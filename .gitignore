@@ -1,0 +1,38 @@
+# Environment variables
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Storage (arquivos temporários)
+backend/storage/temp/*
+backend/storage/originals/*
+backend/storage/processed/*
+
+# Keep directories but not files
+!backend/storage/temp/.gitkeep
+!backend/storage/originals/.gitkeep
+!backend/storage/processed/.gitkeep" > .gitignore
