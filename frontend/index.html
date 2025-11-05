@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAMPS PDF Manager v2.0</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="spinner"></div>
+        <p>Carregando CAMPS PDF Manager...</p>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal">
+        <div class="modal-content">
+            <h2><i class="fas fa-shield-alt"></i> Login - CAMPS PDF Manager</h2>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label><i class="fas fa-envelope"></i> Email:</label>
+                    <input type="email" id="loginEmail" required placeholder="seu.email@camps.com">
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-lock"></i> Senha:</label>
+                    <input type="password" id="loginPassword" required placeholder="Sua senha">
+                </div>
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-sign-in-alt"></i> Entrar
+                </button>
+                <div id="loginError" class="error-message"></div>
+            </form>
+            <div class="login-help">
+                <p><strong>Credenciais padrão:</strong></p>
+                <p>Email: admin@camps.com | Senha: admin123</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <div id="appContainer" style="display: none;">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="header-left">
+                <h1><i class="fas fa-file-pdf"></i> CAMPS PDF Manager</h1>
+                <span class="version">v2.0</span>
+            </div>
+            <div class="header-right">
+                <span id="userInfo" class="user-info"></span>
+                <button id="logoutBtn" class="btn-secondary">
+                    <i class="fas fa-sign-out-alt"></i> Sair
+                </button>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="main-nav">
+            <button class="nav-btn active" data-section="dashboard">
+                <i class="fas fa-chart-dashboard"></i> Dashboard
+            </button>
+            <button class="nav-btn" data-section="upload">
+                <i class="fas fa-cloud-upload-alt"></i> Upload PDFs
+            </button>
+            <button class="nav-btn" data-section="documents">
+                <i class="fas fa-folder-open"></i> Documentos
+            </button>
+            <button class="nav-btn" data-section="users" id="usersNav" style="display: none;">
+                <i class="fas fa-users"></i> Usuários
+            </button>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Section -->
+            <section id="dashboardSection" class="content-section active">
+                <h2><i class="fas fa-chart-line"></i> Dashboard</h2>
+                
+                <div id="dashboardStats" class="stats-grid">
+                    <!-- Stats serão carregadas dinamicamente -->
+                </div>
+
+                <div class="charts-container">
+                    <div class="chart-card">
+                        <h3>Documentos por Dia</h3>
+                        <canvas id="timelineChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Documentos por Tipo</h3>
+                        <canvas id="typeChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Status de Assinaturas</h3>
+                        <canvas id="signatureChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="recent-docs">
+                    <h3>Documentos Recentes</h3>
+                    <div id="recentDocuments" class="doc-list">
+                        <!-- Documentos recentes -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Upload Section -->
+            <section id="uploadSection" class="content-section">
+                <h2><i class="fas fa-cloud-upload-alt"></i> Upload de PDFs</h2>
+                
+                <div class="upload-container">
+                    <div class="drop-zone" id="dropZone">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <p>Arraste e solte PDFs aqui ou clique para selecionar</p>
+                        <input type="file" id="fileInput" multiple accept=".pdf" hidden>
+                        <button class="btn-primary" onclick="document.getElementById('fileInput').click()">
+                            <i class="fas fa-folder-open"></i> Selecionar Arquivos
+                        </button>
+                    </div>
+                    
+                    <div id="fileList" class="file-list"></div>
+                    
+                    <div class="upload-actions">
+                        <button id="uploadBtn" class="btn-success" disabled>
+                            <i class="fas fa-upload"></i> Enviar PDFs
+                        </button>
+                        <button id="clearBtn" class="btn-secondary">
+                            <i class="fas fa-trash"></i> Limpar Lista
+                        </button>
+                    </div>
+                </div>
+
+                <div id="uploadResults" class="results-container"></div>
+            </section>
+
+            <!-- Documents Section -->
+            <section id="documentsSection" class="content-section">
+                <h2><i class="fas fa-folder-open"></i> Gerenciar Documentos</h2>
+                
+                <div class="filters-container">
+                    <input type="text" id="searchInput" placeholder="Buscar por título, autor ou identificador...">
+                    <select id="statusFilter">
+                        <option value="">Todos os status</option>
+                        <option value="uploaded">Enviado</option>
+                        <option value="metadata_added">Metadados Adicionados</option>
+                        <option value="signed">Assinado</option>
+                    </select>
+                    <select id="typeFilter">
+                        <option value="">Todos os tipos</option>
+                    </select>
+                    <button id="searchBtn" class="btn-primary">
+                        <i class="fas fa-search"></i> Buscar
+                    </button>
+                </div>
+
+                <div id="documentsGrid" class="documents-grid">
+                    <!-- Documentos carregados dinamicamente -->
+                </div>
+
+                <div id="pagination" class="pagination">
+                    <!-- Paginação -->
+                </div>
+            </section>
+
+            <!-- Users Section -->
+            <section id="usersSection" class="content-section">
+                <h2><i class="fas fa-users"></i> Gerenciar Usuários</h2>
+                
+                <div class="users-actions">
+                    <button id="addUserBtn" class="btn-success">
+                        <i class="fas fa-user-plus"></i> Adicionar Usuário
+                    </button>
+                </div>
+
+                <div id="usersGrid" class="users-grid">
+                    <!-- Usuários carregados dinamicamente -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Document Details Modal -->
+    <div id="documentModal" class="modal">
+        <div class="modal-content large">
+            <span class="close">&times;</span>
+            <div id="documentDetails">
+                <!-- Detalhes do documento -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add User Modal -->
+    <div id="addUserModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h3>Adicionar Novo Usuário</h3>
+            <form id="addUserForm">
+                <div class="form-group">
+                    <label>Nome:</label>
+                    <input type="text" id="userName" required>
+                </div>
+                <div class="form-group">
+                    <label>Email:</label>
+                    <input type="email" id="userEmail" required>
+                </div>
+                <div class="form-group">
+                    <label>Senha:</label>
+                    <input type="password" id="userPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>Perfil:</label>
+                    <select id="userRole" required>
+                        <option value="user">Usuário</option>
+                        <option value="admin">Administrador</option>
+                        <option value="viewer">Visualizador</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-success">
+                    <i class="fas fa-user-plus"></i> Criar Usuário
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="auth.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
