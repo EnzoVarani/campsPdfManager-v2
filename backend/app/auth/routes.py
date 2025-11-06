@@ -1,8 +1,8 @@
 """
-Módulo de autenticação (login, refresh, perfil, gestão de usuários)
+Rotas de autenticação - SEM IMPORT CIRCULAR
 """
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token, create_refresh_token, jwt_required, 
     get_jwt_identity
@@ -12,11 +12,12 @@ from app.models import User, UserRole, db
 from app.utils.validators import validate_email, validate_password
 from app.utils.decorators import admin_required
 
-# Usar o blueprint já criado em __init__.py
+# Importar o blueprint do módulo pai
 from . import auth_bp
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
+    """Endpoint de login com JWT"""
     data = request.get_json() or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
@@ -33,15 +34,32 @@ def login():
     if not user.is_active:
         return jsonify({'success': False, 'message': 'Conta desativada'}), 403
 
-    tokens = user.generate_tokens()
+    # Gerar tokens usando o método do modelo
+    access_token = create_access_token(
+        identity=user.id,
+        additional_claims={'role': user.role.value, 'name': user.name}
+    )
+    refresh_token = create_refresh_token(identity=user.id)
+    
+    # Atualizar last_login
     user.last_login = datetime.utcnow()
     db.session.commit()
 
-    return jsonify({'success': True, 'data': {'user': user.to_dict(), 'tokens': tokens}}), 200
+    return jsonify({
+        'success': True, 
+        'data': {
+            'user': user.to_dict(), 
+            'tokens': {
+                'access_token': access_token,
+                'refresh_token': refresh_token
+            }
+        }
+    }), 200
 
 @auth_bp.route('/refresh', methods=['POST'])
 @jwt_required(refresh=True)
 def refresh():
+    """Renovar token de acesso"""
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     if not user or not user.is_active:
@@ -54,6 +72,7 @@ def refresh():
 @auth_bp.route('/profile', methods=['GET'])
 @jwt_required()
 def profile():
+    """Dados do perfil do usuário atual"""
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     if not user:
@@ -64,6 +83,7 @@ def profile():
 @jwt_required()
 @admin_required
 def create_user():
+    """Criar novo usuário (apenas admins)"""
     data = request.get_json() or {}
 
     required = ['name', 'email', 'password', 'role']
@@ -96,5 +116,6 @@ def create_user():
 @jwt_required()
 @admin_required
 def list_users():
+    """Listar todos os usuários (apenas admins)"""
     users = User.query.order_by(User.created_at.desc()).all()
     return jsonify({'success': True, 'data': [u.to_dict() for u in users]}), 200
