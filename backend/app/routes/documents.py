@@ -12,7 +12,7 @@ from datetime import datetime
 from app.models import Document, AuditLog, db
 from app.services.pdf_service import PDFService
 from app.utils.helpers import generate_identifier, allowed_file
-from app.utils.validators import admin_required, user_required
+from app.utils.decorators import admin_required, user_required
 
 documents_bp = Blueprint('documents', __name__)
 

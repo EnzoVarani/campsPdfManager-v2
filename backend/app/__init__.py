@@ -66,9 +66,9 @@ def create_app(config_name=None):
             }
         return {}
     
-    @jwt.user_identity_loader
+    @jwt.user_identity_loader  
     def user_identity_lookup(user):
-        return user.id
+        return user 
     
     @jwt.user_lookup_loader
     def user_lookup_callback(_jwt_header, jwt_data):

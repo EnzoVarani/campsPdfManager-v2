@@ -7,7 +7,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
 from sqlalchemy import func, desc, extract
 from app.models import Document, AuditLog, User, db
-from app.utils.validators import admin_required
+from app.utils.decorators import admin_required
 
 analytics_bp = Blueprint('analytics', __name__)
 
