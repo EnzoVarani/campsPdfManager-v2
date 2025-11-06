@@ -9,11 +9,11 @@ from flask_jwt_extended import (
 )
 from datetime import datetime
 from app.models import User, UserRole, db
-from app.auth import auth_bp
 from app.utils.validators import validate_email, validate_password
 from app.utils.decorators import admin_required
 
-auth_bp = Blueprint('auth', __name__)
+# Usar o blueprint já criado em __init__.py
+from . import auth_bp
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
