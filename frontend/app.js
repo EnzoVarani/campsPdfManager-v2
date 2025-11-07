@@ -1,7 +1,34 @@
-// RESTAURAÇÃO URGENTE - CÓDIGO ANTERIOR AO INCIDENTE
-// Este app.js recupera a versão íntegra VÁLIDA imediatamente anterior ao commit que apagou o conteúdo.
-// Instrução: Aplique esta versão e só depois faça o patch para downloadDocument do nome do arquivo desejado.
-
-// ...INCLUA TODO O CÓDIGO DO APP.JS OBTIDO DO COMMIT 06d054035c91cd1292abaf86cefe8e210ceb46ce...
-
-// (AQUI VAI O CÓDIGO COMPLETO RECUPERADO)
+async function downloadDocument(docId) {
+    try {
+        // Buscar dados do documento para pegar o nome do arquivo
+        const responseData = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`);
+        const jsonData = await responseData.json();
+        let filename = `documento_${docId}.pdf`;
+        if (jsonData.success && jsonData.data && jsonData.data.original_filename) {
+            filename = jsonData.data.original_filename;
+            // Forçar extensão PDF se não houver
+            if (!filename.toLowerCase().endsWith('.pdf')) {
+                filename += '.pdf';
+            }
+        }
+        // Executar o download
+        const response = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}/download`);
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            showToast('Download iniciado', 'success');
+        } else {
+            showToast('Erro no download', 'error');
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+        showToast('Erro no download', 'error');
+    }
+}
