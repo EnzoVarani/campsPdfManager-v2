@@ -1,6 +1,6 @@
 /**
  * CAMPS PDF Manager v2.0 - Main Application Logic
- * VERSÃO CORRIGIDA E FUNCIONAL
+ * VERSÃO CORRIGIDA - Timezone Brasília
  */
 
 const API_BASE = 'http://localhost:5000/api';
@@ -398,12 +398,10 @@ async function uploadFiles(files) {
             formData.append('files[]', file);
         });
         
-        // ✅ CORREÇÃO: Usar fetch direto com Authorization manual
         const response = await fetch(`${API_BASE}/documents/upload`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${auth.token}`
-                // ❌ NÃO adicionar Content-Type para FormData
             },
             body: formData
         });
@@ -414,11 +412,9 @@ async function uploadFiles(files) {
             showUploadResults(data.data);
             showToast(data.message, 'success');
             
-            // Limpar lista
             selectedFiles = [];
             updateFileList();
             
-            // Recarregar dashboard se estiver ativo
             if (document.getElementById('dashboardSection').classList.contains('active')) {
                 loadDashboard();
             }
@@ -488,7 +484,6 @@ async function loadDocuments(page = 1) {
             ...(docType && { doc_type: docType })
         });
         
-        // ✅ CORREÇÃO: Adicionar barra no final da URL
         const response = await auth.fetchWithAuth(`${API_BASE}/documents/?${params}`);
         const data = await response.json();
         
@@ -577,12 +572,10 @@ function displayDocumentModal(doc) {
     const modal = document.getElementById('documentModal');
     const details = document.getElementById('documentDetails');
     
-    // Processar audit logs com segurança e ordenar por data
     let auditLogsHTML = '<div class="empty-state-small"><i class="fas fa-info-circle"></i> Nenhum registro encontrado</div>';
     
     try {
         if (doc.audit_logs && Array.isArray(doc.audit_logs) && doc.audit_logs.length > 0) {
-            // Ordenar por timestamp (mais recente primeiro)
             const sortedLogs = [...doc.audit_logs].sort((a, b) => {
                 const dateA = new Date(a.timestamp);
                 const dateB = new Date(b.timestamp);
@@ -590,18 +583,14 @@ function displayDocumentModal(doc) {
             });
             
             auditLogsHTML = sortedLogs.map(log => {
-                // Ícone baseado na ação
                 const actionIcon = log.action === 'upload' ? 'cloud-upload-alt' : 
                                  log.action === 'download' ? 'cloud-download-alt' : 
                                  log.action === 'update' ? 'edit' : 
                                  log.action === 'delete' ? 'trash' : 'history';
                 
-                // ✅ CORREÇÃO: Formatar descrição do upload
                 let description = log.description || 'Sem descrição';
                 
-                // Se for upload, reformatar a descrição
                 if (log.action === 'upload' && description.includes('enviado')) {
-                    // Extrair nome do arquivo da descrição
                     const match = description.match(/Documento (.+?) enviado/);
                     if (match) {
                         description = `Upload do documento ${match[1]}`;
@@ -629,7 +618,6 @@ function displayDocumentModal(doc) {
         auditLogsHTML = '<div class="error-state"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar histórico</div>';
     }
     
-    // Status badge
     const statusMap = {
         'uploaded': { class: 'info', icon: 'cloud-upload-alt', text: 'Enviado' },
         'processing': { class: 'warning', icon: 'spinner', text: 'Processando' },
@@ -641,7 +629,6 @@ function displayDocumentModal(doc) {
     
     details.innerHTML = `
         <div class="modal-content-wrapper">
-            <!-- Header do Modal SEM botão X -->
             <div class="modal-header-section">
                 <div class="modal-title-area">
                     <h2 class="modal-title">
@@ -655,7 +642,6 @@ function displayDocumentModal(doc) {
                 </div>
             </div>
 
-            <!-- Informações Principais -->
             <div class="modal-body-section">
                 <div class="info-section">
                     <h3 class="section-title">
@@ -686,7 +672,6 @@ function displayDocumentModal(doc) {
                     </div>
                 </div>
 
-                <!-- Metadados -->
                 <div class="info-section">
                     <h3 class="section-title">
                         <i class="fas fa-tags"></i>
@@ -712,7 +697,6 @@ function displayDocumentModal(doc) {
                     </div>
                 </div>
 
-                <!-- Datas -->
                 <div class="info-section">
                     <h3 class="section-title">
                         <i class="fas fa-clock"></i>
@@ -730,7 +714,6 @@ function displayDocumentModal(doc) {
                     </div>
                 </div>
 
-                <!-- Segurança -->
                 <div class="info-section">
                     <h3 class="section-title">
                         <i class="fas fa-shield-alt"></i>
@@ -742,7 +725,6 @@ function displayDocumentModal(doc) {
                     </div>
                 </div>
 
-                <!-- Histórico de Ações -->
                 <div class="info-section">
                     <h3 class="section-title">
                         <i class="fas fa-history"></i>
@@ -754,7 +736,6 @@ function displayDocumentModal(doc) {
                 </div>
             </div>
 
-            <!-- Footer com Ações -->
             <div class="modal-footer-section">
                 <button onclick="downloadDocument(${doc.id})" class="btn btn-primary">
                     <i class="fas fa-download"></i>
@@ -817,10 +798,8 @@ async function deleteDocument(docId) {
         if (data.success) {
             showToast('Documento deletado com sucesso', 'success');
             
-            // ✅ CORREÇÃO: Apenas recarregar lista de documentos (não voltar pro dashboard)
             loadDocuments(currentPage);
             
-            // ✅ OPCIONAL: Atualizar dashboard em background SE estiver aberto
             const dashboardSection = document.getElementById('dashboardSection');
             if (dashboardSection && dashboardSection.classList.contains('active')) {
                 loadDashboard();
@@ -897,7 +876,6 @@ function setupModals() {
         }
     });
     
-    // Add User Modal
     const addUserBtn = document.getElementById('addUserBtn');
     const addUserModal = document.getElementById('addUserModal');
     const addUserForm = document.getElementById('addUserForm');
@@ -951,34 +929,36 @@ function formatDate(dateString, format = 'long') {
     if (!dateString) return 'N/A';
     
     try {
+        // Criar data a partir da string ISO
         const date = new Date(dateString);
         
         if (isNaN(date.getTime())) {
             return 'Data inválida';
         }
         
-        // ✅ CORREÇÃO: Forçar timezone de Brasília (America/Sao_Paulo)
-        const options = {
+        // Opções para timezone de Brasília
+        const timezoneOptions = {
             timeZone: 'America/Sao_Paulo',
-            day: '2-digit',
-            month: '2-digit'
+            hour12: false
         };
         
         if (format === 'short') {
-            return date.toLocaleDateString('pt-BR', options);
+            return date.toLocaleDateString('pt-BR', {
+                ...timezoneOptions,
+                day: '2-digit',
+                month: '2-digit'
+            });
         }
         
-        // Formato longo com hora
-        const optionsLong = {
-            timeZone: 'America/Sao_Paulo',
+        // Formato completo: DD/MM/YYYY, HH:MM
+        return date.toLocaleString('pt-BR', {
+            ...timezoneOptions,
             day: '2-digit',
-            month: '2-digit', 
+            month: '2-digit',
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit'
-        };
-        
-        return date.toLocaleString('pt-BR', optionsLong);
+        });
     } catch (error) {
         console.error('Erro ao formatar data:', error);
         return 'N/A';
@@ -1014,7 +994,6 @@ function updatePagination(pagination) {
         <div class="pagination-buttons">
     `;
     
-    // Previous button
     if (pagination.current_page > 1) {
         paginationHTML += `
             <button onclick="loadDocuments(${pagination.current_page - 1})" class="btn-secondary">
@@ -1023,7 +1002,6 @@ function updatePagination(pagination) {
         `;
     }
     
-    // Page numbers
     const startPage = Math.max(1, pagination.current_page - 2);
     const endPage = Math.min(pagination.pages, pagination.current_page + 2);
     
@@ -1035,7 +1013,6 @@ function updatePagination(pagination) {
         `;
     }
     
-    // Next button
     if (pagination.current_page < pagination.pages) {
         paginationHTML += `
             <button onclick="loadDocuments(${pagination.current_page + 1})" class="btn-secondary">
@@ -1048,7 +1025,6 @@ function updatePagination(pagination) {
     paginationDiv.innerHTML = paginationHTML;
 }
 
-// Inicializar busca
 setTimeout(() => {
     const searchBtn = document.getElementById('searchBtn');
     if (searchBtn) {
