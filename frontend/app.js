@@ -397,10 +397,12 @@ async function uploadFiles(files) {
             formData.append('files[]', file);
         });
         
-        const response = await auth.fetchWithAuth(`${API_BASE}/documents/upload`, {
+        // ✅ CORREÇÃO: Usar fetch direto com Authorization manual
+        const response = await fetch(`${API_BASE}/documents/upload`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${auth.token}`
+                // ❌ NÃO adicionar Content-Type para FormData
             },
             body: formData
         });
