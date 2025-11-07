@@ -573,77 +573,203 @@ async function showDocumentDetails(docId) {
     }
 }
 
-function displayDocumentModal(doc) {  // ✅ Renomeado para "doc"
+function displayDocumentModal(doc) {
     const modal = document.getElementById('documentModal');
     const details = document.getElementById('documentDetails');
     
-    // ✅ CORREÇÃO: Processar audit logs com segurança TOTAL
-    let auditLogsHTML = '<p>Nenhum log de auditoria encontrado</p>';
+    // Processar audit logs com segurança e ordenar por data
+    let auditLogsHTML = '<div class="empty-state-small"><i class="fas fa-info-circle"></i> Nenhum registro encontrado</div>';
     
     try {
         if (doc.audit_logs && Array.isArray(doc.audit_logs) && doc.audit_logs.length > 0) {
-            auditLogsHTML = doc.audit_logs.map(log => `
-                <div class="audit-item">
-                    <div class="audit-info">
-                        <strong>${log.action || 'Ação desconhecida'}</strong>
-                        <p>${log.description || 'Sem descrição'}</p>
-                        <small>
-                            ${log.timestamp ? formatDate(log.timestamp) : 'Data desconhecida'}
-                            ${log.ip_address ? ' | IP: ' + log.ip_address : ''}
-                        </small>
+            // Ordenar por timestamp (mais recente primeiro)
+            const sortedLogs = [...doc.audit_logs].sort((a, b) => {
+                const dateA = new Date(a.timestamp);
+                const dateB = new Date(b.timestamp);
+                return dateB - dateA;
+            });
+            
+            auditLogsHTML = sortedLogs.map(log => {
+                // Ícone baseado na ação
+                const actionIcon = log.action === 'upload' ? 'cloud-upload-alt' : 
+                                 log.action === 'download' ? 'cloud-download-alt' : 
+                                 log.action === 'update' ? 'edit' : 
+                                 log.action === 'delete' ? 'trash' : 'history';
+                
+                // ✅ CORREÇÃO: Formatar descrição do upload
+                let description = log.description || 'Sem descrição';
+                
+                // Se for upload, reformatar a descrição
+                if (log.action === 'upload' && description.includes('enviado')) {
+                    // Extrair nome do arquivo da descrição
+                    const match = description.match(/Documento (.+?) enviado/);
+                    if (match) {
+                        description = `Upload do documento ${match[1]}`;
+                    }
+                }
+                
+                return `
+                    <div class="audit-item">
+                        <div class="audit-icon">
+                            <i class="fas fa-${actionIcon}"></i>
+                        </div>
+                        <div class="audit-content">
+                            <div class="audit-description">${description}</div>
+                            <div class="audit-meta">
+                                <i class="fas fa-clock"></i> ${log.timestamp ? formatDate(log.timestamp) : 'Data desconhecida'}
+                                ${log.ip_address ? ' • <i class="fas fa-network-wired"></i> ' + log.ip_address : ''}
+                            </div>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
     } catch (error) {
         console.error('Erro ao processar audit logs:', error);
-        auditLogsHTML = '<p class="error">Erro ao carregar histórico</p>';
+        auditLogsHTML = '<div class="error-state"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar histórico</div>';
     }
     
+    // Status badge
+    const statusMap = {
+        'uploaded': { class: 'info', icon: 'cloud-upload-alt', text: 'Enviado' },
+        'processing': { class: 'warning', icon: 'spinner', text: 'Processando' },
+        'completed': { class: 'success', icon: 'check-circle', text: 'Concluído' },
+        'error': { class: 'danger', icon: 'exclamation-circle', text: 'Erro' }
+    };
+    
+    const statusInfo = statusMap[doc.status] || { class: 'secondary', icon: 'info-circle', text: doc.status || 'Desconhecido' };
+    
     details.innerHTML = `
-        <div class="doc-details">
-            <h2>${doc.title || doc.original_filename || 'Documento sem título'}</h2>
-            
-            <div class="doc-info-grid">
-                <div><strong>ID:</strong> ${doc.identifier || 'N/A'}</div>
-                <div><strong>Nome do Arquivo:</strong> ${doc.original_filename || 'N/A'}</div>
-                <div><strong>Autor:</strong> ${doc.author || 'Não informado'}</div>
-                <div><strong>Assunto:</strong> ${doc.subject || 'Não informado'}</div>
-                <div><strong>Tipo:</strong> ${doc.doc_type || 'Não classificado'}</div>
-                <div><strong>Status:</strong> 
-                    <span class="status-badge status-${doc.status || 'uploaded'}">
-                        ${doc.status || 'uploaded'}
+        <div class="modal-content-wrapper">
+            <!-- Header do Modal SEM botão X -->
+            <div class="modal-header-section">
+                <div class="modal-title-area">
+                    <h2 class="modal-title">
+                        <i class="fas fa-file-pdf"></i>
+                        ${doc.title || doc.original_filename || 'Documento sem título'}
+                    </h2>
+                    <span class="badge badge-${statusInfo.class}">
+                        <i class="fas fa-${statusInfo.icon}"></i>
+                        ${statusInfo.text}
                     </span>
                 </div>
-                <div><strong>Criado em:</strong> ${doc.created_at ? formatDate(doc.created_at) : 'N/A'}</div>
-                <div><strong>Atualizado em:</strong> ${doc.updated_at ? formatDate(doc.updated_at) : 'N/A'}</div>
-                <div><strong>Tamanho:</strong> ${doc.file_size ? formatFileSize(doc.file_size) : 'N/A'}</div>
-                <div><strong>Hash SHA-256:</strong> 
-                    <code>${doc.hash_sha256 ? doc.hash_sha256.substring(0, 16) + '...' : 'N/A'}</code>
-                </div>
-                <div><strong>Assinado:</strong> ${doc.is_signed ? '✅ Sim' : '❌ Não'}</div>
-                <div><strong>Criado por:</strong> Usuário ID ${doc.created_by || 'N/A'}</div>
             </div>
-            
-            <div class="doc-actions-modal">
-                <button onclick="downloadDocument(${doc.id}); document.getElementById('documentModal').style.display='none';" class="btn-primary">
-                    <i class="fas fa-download"></i> Download
+
+            <!-- Informações Principais -->
+            <div class="modal-body-section">
+                <div class="info-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-info-circle"></i>
+                        Informações do Documento
+                    </h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">ID do Documento</span>
+                            <span class="info-value">${doc.identifier || 'N/A'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Nome do Arquivo</span>
+                            <span class="info-value">${doc.original_filename || 'N/A'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Tamanho</span>
+                            <span class="info-value">${doc.file_size ? formatFileSize(doc.file_size) : 'N/A'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Assinado</span>
+                            <span class="info-value">
+                                ${doc.is_signed ? 
+                                    '<span class="badge badge-success"><i class="fas fa-check"></i> Sim</span>' : 
+                                    '<span class="badge badge-secondary"><i class="fas fa-times"></i> Não</span>'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Metadados -->
+                <div class="info-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-tags"></i>
+                        Metadados
+                    </h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Autor</span>
+                            <span class="info-value">${doc.author || 'Não informado'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Assunto</span>
+                            <span class="info-value">${doc.subject || 'Não informado'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Tipo</span>
+                            <span class="info-value">${doc.doc_type || 'Não classificado'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Criado por</span>
+                            <span class="info-value">Usuário #${doc.created_by || 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Datas -->
+                <div class="info-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-clock"></i>
+                        Datas
+                    </h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Criado em</span>
+                            <span class="info-value">${doc.created_at ? formatDate(doc.created_at) : 'N/A'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Atualizado em</span>
+                            <span class="info-value">${doc.updated_at ? formatDate(doc.updated_at) : 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Segurança -->
+                <div class="info-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-shield-alt"></i>
+                        Segurança
+                    </h3>
+                    <div class="info-item full-width">
+                        <span class="info-label">Hash SHA-256</span>
+                        <code class="hash-code">${doc.hash_sha256 || 'N/A'}</code>
+                    </div>
+                </div>
+
+                <!-- Histórico de Ações -->
+                <div class="info-section">
+                    <h3 class="section-title">
+                        <i class="fas fa-history"></i>
+                        Histórico de Ações
+                    </h3>
+                    <div class="audit-logs-container">
+                        ${auditLogsHTML}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer com Ações -->
+            <div class="modal-footer-section">
+                <button onclick="downloadDocument(${doc.id})" class="btn btn-primary">
+                    <i class="fas fa-download"></i>
+                    Download
                 </button>
                 ${auth.hasPermission('update') && doc.status === 'uploaded' ? `
-                    <button onclick="addMetadataForm(${doc.id})" class="btn-success">
-                        <i class="fas fa-edit"></i> Adicionar Metadados
+                    <button onclick="addMetadataForm(${doc.id})" class="btn btn-success">
+                        <i class="fas fa-edit"></i>
+                        Adicionar Metadados
                     </button>
                 ` : ''}
-                <button onclick="document.getElementById('documentModal').style.display='none';" class="btn-secondary">
-                    <i class="fas fa-times"></i> Fechar
+                <button onclick="document.getElementById('documentModal').style.display='none';" class="btn btn-secondary">
+                    <i class="fas fa-times"></i>
+                    Fechar
                 </button>
-            </div>
-            
-            <div class="audit-logs">
-                <h3><i class="fas fa-history"></i> Histórico de Ações</h3>
-                <div class="audit-list">
-                    ${auditLogsHTML}
-                </div>
             </div>
         </div>
     `;
@@ -831,20 +957,28 @@ function formatDate(dateString, format = 'long') {
             return 'Data inválida';
         }
         
+        // ✅ CORREÇÃO: Forçar timezone de Brasília (America/Sao_Paulo)
+        const options = {
+            timeZone: 'America/Sao_Paulo',
+            day: '2-digit',
+            month: '2-digit'
+        };
+        
         if (format === 'short') {
-            return date.toLocaleDateString('pt-BR', { 
-                day: '2-digit', 
-                month: '2-digit' 
-            });
+            return date.toLocaleDateString('pt-BR', options);
         }
         
-        return date.toLocaleString('pt-BR', {
+        // Formato longo com hora
+        const optionsLong = {
+            timeZone: 'America/Sao_Paulo',
             day: '2-digit',
             month: '2-digit', 
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit'
-        });
+        };
+        
+        return date.toLocaleString('pt-BR', optionsLong);
     } catch (error) {
         console.error('Erro ao formatar data:', error);
         return 'N/A';
