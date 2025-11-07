@@ -103,24 +103,24 @@ class Document(db.Model):
         return {
             'id': self.id,
             'identifier': self.identifier,
-            'title': self.title,
-            'subject': self.subject,
-            'author': self.author,
-            'doc_type': self.doc_type,
-            'digitalization_date': self.digitalization_date.isoformat() if self.digitalization_date else None,
-            'digitalization_location': self.digitalization_location,
-            'responsible': self.responsible,
             'original_filename': self.original_filename,
-            'hash_sha256': self.hash_sha256,
             'file_size': self.file_size,
-            'is_signed': self.is_signed,
-            'signature_date': self.signature_date.isoformat() if self.signature_date else None,
-            'signature_provider': self.signature_provider,
-            'signature_status': self.signature_status,
+            'hash_sha256': self.hash_sha256,
+            'title': self.title or None,
+            'author': self.author or None,
+            'subject': self.subject or None,
+            'doc_type': self.doc_type or None,
+            'responsible': self.responsible or None,
             'status': self.status,
-            'created_by': self.created_by,
+            'is_signed': self.is_signed,
+            'signature_status': self.signature_status,
+            'signature_provider': self.signature_provider,
+            'signature_date': self.signature_date.isoformat() if self.signature_date else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_by': self.created_by,  # ✅ Apenas o ID
+            'digitalization_date': self.digitalization_date.isoformat() if self.digitalization_date else None,
+            'digitalization_location': self.digitalization_location
         }
 
 class AuditLog(db.Model):
@@ -137,11 +137,11 @@ class AuditLog(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
-            'document_id': self.document_id,
-            'user_id': self.user_id,
             'action': self.action,
             'description': self.description,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'ip_address': self.ip_address,
             'user_agent': self.user_agent,
-            'timestamp': self.timestamp.isoformat() if self.timestamp else None
+            'document_id': self.document_id,
+            'user_id': self.user_id  # ✅ Apenas o ID (sem relationship)
         }

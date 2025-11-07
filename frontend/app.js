@@ -1,5 +1,6 @@
 /**
  * CAMPS PDF Manager v2.0 - Main Application Logic
+ * VERSÃO CORRIGIDA E FUNCIONAL
  */
 
 const API_BASE = 'http://localhost:5000/api';
@@ -417,7 +418,7 @@ async function uploadFiles(files) {
             selectedFiles = [];
             updateFileList();
             
-            // Recarregar dashboard
+            // Recarregar dashboard se estiver ativo
             if (document.getElementById('dashboardSection').classList.contains('active')) {
                 loadDashboard();
             }
@@ -487,7 +488,8 @@ async function loadDocuments(page = 1) {
             ...(docType && { doc_type: docType })
         });
         
-        const response = await auth.fetchWithAuth(`${API_BASE}/documents?${params}`);
+        // ✅ CORREÇÃO: Adicionar barra no final da URL
+        const response = await auth.fetchWithAuth(`${API_BASE}/documents/?${params}`);
         const data = await response.json();
         
         if (data.success) {
@@ -562,53 +564,83 @@ async function showDocumentDetails(docId) {
         
         if (data.success) {
             displayDocumentModal(data.data);
+        } else {
+            showToast('Erro ao carregar detalhes', 'error');
         }
     } catch (error) {
+        console.error('Detalhes error:', error);
         showToast('Erro ao carregar detalhes', 'error');
     }
 }
 
-function displayDocumentModal(document) {
+function displayDocumentModal(doc) {  // ✅ Renomeado para "doc"
     const modal = document.getElementById('documentModal');
     const details = document.getElementById('documentDetails');
     
-    const auditLogsHTML = document.audit_logs?.map(log => `
-        <div class="audit-item">
-            <div class="audit-info">
-                <strong>${log.action}</strong>
-                <p>${log.description}</p>
-                <small>${formatDate(log.timestamp)} | IP: ${log.ip_address}</small>
-            </div>
-        </div>
-    `).join('') || '<p>Nenhum log encontrado</p>';
+    // ✅ CORREÇÃO: Processar audit logs com segurança TOTAL
+    let auditLogsHTML = '<p>Nenhum log de auditoria encontrado</p>';
+    
+    try {
+        if (doc.audit_logs && Array.isArray(doc.audit_logs) && doc.audit_logs.length > 0) {
+            auditLogsHTML = doc.audit_logs.map(log => `
+                <div class="audit-item">
+                    <div class="audit-info">
+                        <strong>${log.action || 'Ação desconhecida'}</strong>
+                        <p>${log.description || 'Sem descrição'}</p>
+                        <small>
+                            ${log.timestamp ? formatDate(log.timestamp) : 'Data desconhecida'}
+                            ${log.ip_address ? ' | IP: ' + log.ip_address : ''}
+                        </small>
+                    </div>
+                </div>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('Erro ao processar audit logs:', error);
+        auditLogsHTML = '<p class="error">Erro ao carregar histórico</p>';
+    }
     
     details.innerHTML = `
         <div class="doc-details">
-            <h2>${document.title || document.original_filename}</h2>
+            <h2>${doc.title || doc.original_filename || 'Documento sem título'}</h2>
+            
             <div class="doc-info-grid">
-                <div><strong>ID:</strong> ${document.identifier}</div>
-                <div><strong>Autor:</strong> ${document.author || 'N/A'}</div>
-                <div><strong>Tipo:</strong> ${document.doc_type || 'N/A'}</div>
-                <div><strong>Status:</strong> <span class="status-badge status-${document.status}">${document.status}</span></div>
-                <div><strong>Criado em:</strong> ${formatDate(document.created_at)}</div>
-                <div><strong>Tamanho:</strong> ${formatFileSize(document.file_size)}</div>
-                <div><strong>Hash:</strong> <code>${document.hash_sha256?.substring(0, 16)}...</code></div>
-                <div><strong>Assinado:</strong> ${document.is_signed ? '✅ Sim' : '❌ Não'}</div>
+                <div><strong>ID:</strong> ${doc.identifier || 'N/A'}</div>
+                <div><strong>Nome do Arquivo:</strong> ${doc.original_filename || 'N/A'}</div>
+                <div><strong>Autor:</strong> ${doc.author || 'Não informado'}</div>
+                <div><strong>Assunto:</strong> ${doc.subject || 'Não informado'}</div>
+                <div><strong>Tipo:</strong> ${doc.doc_type || 'Não classificado'}</div>
+                <div><strong>Status:</strong> 
+                    <span class="status-badge status-${doc.status || 'uploaded'}">
+                        ${doc.status || 'uploaded'}
+                    </span>
+                </div>
+                <div><strong>Criado em:</strong> ${doc.created_at ? formatDate(doc.created_at) : 'N/A'}</div>
+                <div><strong>Atualizado em:</strong> ${doc.updated_at ? formatDate(doc.updated_at) : 'N/A'}</div>
+                <div><strong>Tamanho:</strong> ${doc.file_size ? formatFileSize(doc.file_size) : 'N/A'}</div>
+                <div><strong>Hash SHA-256:</strong> 
+                    <code>${doc.hash_sha256 ? doc.hash_sha256.substring(0, 16) + '...' : 'N/A'}</code>
+                </div>
+                <div><strong>Assinado:</strong> ${doc.is_signed ? '✅ Sim' : '❌ Não'}</div>
+                <div><strong>Criado por:</strong> Usuário ID ${doc.created_by || 'N/A'}</div>
             </div>
             
             <div class="doc-actions-modal">
-                <button onclick="downloadDocument(${document.id})" class="btn-primary">
+                <button onclick="downloadDocument(${doc.id}); document.getElementById('documentModal').style.display='none';" class="btn-primary">
                     <i class="fas fa-download"></i> Download
                 </button>
-                ${auth.hasPermission('update') && document.status === 'uploaded' ? `
-                    <button onclick="addMetadataForm(${document.id})" class="btn-success">
+                ${auth.hasPermission('update') && doc.status === 'uploaded' ? `
+                    <button onclick="addMetadataForm(${doc.id})" class="btn-success">
                         <i class="fas fa-edit"></i> Adicionar Metadados
                     </button>
                 ` : ''}
+                <button onclick="document.getElementById('documentModal').style.display='none';" class="btn-secondary">
+                    <i class="fas fa-times"></i> Fechar
+                </button>
             </div>
             
             <div class="audit-logs">
-                <h3>Histórico de Ações</h3>
+                <h3><i class="fas fa-history"></i> Histórico de Ações</h3>
                 <div class="audit-list">
                     ${auditLogsHTML}
                 </div>
@@ -658,12 +690,21 @@ async function deleteDocument(docId) {
         
         if (data.success) {
             showToast('Documento deletado com sucesso', 'success');
+            
+            // ✅ CORREÇÃO: Apenas recarregar lista de documentos (não voltar pro dashboard)
             loadDocuments(currentPage);
-            loadDashboard(); // Atualizar stats
+            
+            // ✅ OPCIONAL: Atualizar dashboard em background SE estiver aberto
+            const dashboardSection = document.getElementById('dashboardSection');
+            if (dashboardSection && dashboardSection.classList.contains('active')) {
+                loadDashboard();
+            }
+            
         } else {
             showToast(data.message || 'Erro ao deletar', 'error');
         }
     } catch (error) {
+        console.error('Delete error:', error);
         showToast('Erro ao deletar documento', 'error');
     }
 }
@@ -783,29 +824,44 @@ async function createUser() {
 function formatDate(dateString, format = 'long') {
     if (!dateString) return 'N/A';
     
-    const date = new Date(dateString);
-    if (format === 'short') {
-        return date.toLocaleDateString('pt-BR', { 
-            day: '2-digit', 
-            month: '2-digit' 
+    try {
+        const date = new Date(dateString);
+        
+        if (isNaN(date.getTime())) {
+            return 'Data inválida';
+        }
+        
+        if (format === 'short') {
+            return date.toLocaleDateString('pt-BR', { 
+                day: '2-digit', 
+                month: '2-digit' 
+            });
+        }
+        
+        return date.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit', 
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
         });
+    } catch (error) {
+        console.error('Erro ao formatar data:', error);
+        return 'N/A';
     }
-    
-    return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit', 
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
 }
 
 function formatFileSize(bytes) {
-    if (!bytes) return 'N/A';
+    if (!bytes || isNaN(bytes)) return 'N/A';
     
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
+    try {
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
+    } catch (error) {
+        console.error('Erro ao formatar tamanho:', error);
+        return 'N/A';
+    }
 }
 
 function updatePagination(pagination) {
