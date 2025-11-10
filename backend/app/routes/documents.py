@@ -3,6 +3,7 @@ Rotas para gerenciamento de documentos com autenticação JWT
 """
 
 from flask import Blueprint, request, jsonify, send_file, current_app
+from werkzeug.exceptions import RequestEntityTooLarge
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
@@ -15,6 +16,14 @@ from app.utils.helpers import generate_identifier, allowed_file
 from app.utils.decorators import admin_required, user_required
 
 documents_bp = Blueprint('documents', __name__)
+
+@documents_bp.errorhandler(RequestEntityTooLarge)
+def handle_file_too_large(e):
+    max_size_mb = current_app.config.get('MAX_FILE_SIZE_MB', 50)
+    return jsonify({
+        'success': False,
+        'message': f'Arquivo muito grande! Tamanho máximo permitido: {max_size_mb}MB'
+    }), 413
 
 @documents_bp.route('/upload', methods=['POST'])
 @jwt_required()
@@ -40,12 +49,26 @@ def upload_documents():
     
     results = []
     upload_folder = current_app.config['UPLOAD_FOLDER']
+    max_file_size = current_app.config['MAX_FILE_SIZE']
+    max_file_size_mb = current_app.config['MAX_FILE_SIZE_MB']
     pdf_service = PDFService()
     
     for file in files:
         if not isinstance(file, FileStorage) or not file or not file.filename:
             continue
-            
+        
+        file.seek(0, 2)  # Move para o final do arquivo
+        file_size = file.tell()  # Pega o tamanho
+        file.seek(0)  # Volta para o início
+        
+        if file_size > max_file_size:
+            results.append({
+                'filename': file.filename,
+                'success': False,
+                'error': f'Arquivo muito grande ({formatFileSize(file_size)}). Máximo permitido: {max_file_size_mb}MB'
+            })
+            continue
+
         if not allowed_file(file.filename):
             results.append({
                 'filename': file.filename,
@@ -138,6 +161,14 @@ def upload_documents():
         'message': f'{success_count} de {len(results)} arquivos processados',
         'data': results
     }), 200
+
+def formatFileSize(bytes):
+    """Formata bytes em formato legível"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes < 1024.0:
+            return f"{bytes:.2f} {unit}"
+        bytes /= 1024.0
+    return f"{bytes:.2f} TB"
 
 @documents_bp.route('/', methods=['GET'])
 @jwt_required()

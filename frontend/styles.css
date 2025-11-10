@@ -1438,6 +1438,36 @@ body {
     margin-bottom: var(--space-10);
 }
 
+/* ✅ NOVO: Estilos para validação de tamanho */
+.file-item-error {
+    border-left: 3px solid var(--danger-color);
+    background: rgba(220, 53, 69, 0.05);
+}
+
+.file-size-error {
+    color: var(--danger-color);
+    font-weight: bold;
+}
+
+.file-size-error i {
+    margin-left: 5px;
+}
+
+.warning-text {
+    color: var(--warning-color);
+    background: rgba(255, 193, 7, 0.1);
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.warning-text i {
+    font-size: 1.2rem;
+}
+
 .file-info {
     display: flex;
     align-items: center;

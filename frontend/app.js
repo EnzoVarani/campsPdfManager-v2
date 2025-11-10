@@ -12,7 +12,7 @@ let chartsInstances = {};
 // NAVIGATION
 // =============================================================================
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     setupNavigation();
     setupModals();
     setupUploadSystem();
@@ -25,17 +25,17 @@ function setupNavigation() {
     navButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const targetSection = btn.dataset.section;
-            
+
             // Update navigation
             navButtons.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
+
             // Update sections
             sections.forEach(s => s.classList.remove('active'));
             document.getElementById(`${targetSection}Section`).classList.add('active');
-            
+
             // Load section data
-            switch(targetSection) {
+            switch (targetSection) {
                 case 'dashboard':
                     loadDashboard();
                     break;
@@ -76,7 +76,7 @@ async function loadDashboard() {
 
 function updateDashboardStats(data) {
     const stats = data.totals;
-    
+
     const statsHTML = `
         <div class="stat-card">
             <div class="stat-icon"><i class="fas fa-file-pdf"></i></div>
@@ -117,7 +117,7 @@ function updateDashboardStats(data) {
             </div>
         ` : ''}
     `;
-    
+
     document.getElementById('dashboardStats').innerHTML = statsHTML;
 }
 
@@ -126,7 +126,7 @@ function updateRecentDocuments(documents) {
         document.getElementById('recentDocuments').innerHTML = '<p>Nenhum documento encontrado</p>';
         return;
     }
-    
+
     const docsHTML = documents.map(doc => `
         <div class="doc-item" onclick="showDocumentDetails(${doc.id})">
             <div class="doc-icon">
@@ -139,7 +139,7 @@ function updateRecentDocuments(documents) {
             </div>
         </div>
     `).join('');
-    
+
     document.getElementById('recentDocuments').innerHTML = docsHTML;
 }
 
@@ -163,14 +163,14 @@ async function loadTimelineChart() {
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/analytics/charts/documents-timeline?days=30`);
         const data = await response.json();
-        
+
         if (data.success) {
             const ctx = document.getElementById('timelineChart').getContext('2d');
-            
+
             if (chartsInstances.timeline) {
                 chartsInstances.timeline.destroy();
             }
-            
+
             chartsInstances.timeline = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -211,19 +211,19 @@ async function loadTypeChart() {
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/analytics/charts/documents-by-type`);
         const data = await response.json();
-        
+
         if (data.success && data.data.length > 0) {
             const ctx = document.getElementById('typeChart').getContext('2d');
-            
+
             if (chartsInstances.type) {
                 chartsInstances.type.destroy();
             }
-            
+
             const colors = [
-                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', 
+                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
                 '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
             ];
-            
+
             chartsInstances.type = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
@@ -255,14 +255,14 @@ async function loadSignatureChart() {
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/analytics/charts/signature-status`);
         const data = await response.json();
-        
+
         if (data.success) {
             const ctx = document.getElementById('signatureChart').getContext('2d');
-            
+
             if (chartsInstances.signature) {
                 chartsInstances.signature.destroy();
             }
-            
+
             chartsInstances.signature = new Chart(ctx, {
                 type: 'pie',
                 data: {
@@ -297,7 +297,7 @@ function setupUploadSystem() {
     const fileInput = document.getElementById('fileInput');
     const uploadBtn = document.getElementById('uploadBtn');
     const clearBtn = document.getElementById('clearBtn');
-    
+
     let selectedFiles = [];
 
     // Drag & Drop
@@ -313,7 +313,7 @@ function setupUploadSystem() {
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
-        
+
         const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
         addFilesToList(files);
     });
@@ -330,7 +330,7 @@ function setupUploadSystem() {
             showToast('Selecione pelo menos um arquivo', 'error');
             return;
         }
-        
+
         await uploadFiles(selectedFiles);
     });
 
@@ -353,27 +353,40 @@ function setupUploadSystem() {
 
     function updateFileList() {
         const fileList = document.getElementById('fileList');
-        
+
         if (selectedFiles.length === 0) {
             fileList.innerHTML = '';
             return;
         }
-        
-        const filesHTML = selectedFiles.map((file, index) => `
-            <div class="file-item">
-                <div class="file-info">
-                    <i class="fas fa-file-pdf"></i>
-                    <span class="file-name">${file.name}</span>
-                    <span class="file-size">${formatFileSize(file.size)}</span>
+
+        const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+        const filesHTML = selectedFiles.map((file, index) => {
+            const isTooBig = file.size > MAX_FILE_SIZE;
+            const sizeClass = isTooBig ? 'file-size-error' : 'file-size';
+
+            return `
+                <div class="file-item ${isTooBig ? 'file-item-error' : ''}">
+                    <div class="file-info">
+                        <i class="fas fa-file-pdf"></i>
+                        <span class="file-name">${file.name}</span>
+                        <span class="${sizeClass}">
+                            ${formatFileSize(file.size)}
+                            ${isTooBig ? ' <i class="fas fa-exclamation-triangle"></i> Muito grande!' : ''}
+                        </span>
+                    </div>
+                    <button class="btn-remove" onclick="removeFile(${index})">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
-                <button class="btn-remove" onclick="removeFile(${index})">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-        `).join('');
-        
+            `;
+        }).join('');
+
+        const hasInvalidFiles = selectedFiles.some(f => f.size > MAX_FILE_SIZE);
+
         fileList.innerHTML = `
             <h4>Arquivos Selecionados (${selectedFiles.length})</h4>
+            ${hasInvalidFiles ? '<p class="warning-text"><i class="fas fa-exclamation-triangle"></i> Alguns arquivos excedem 50MB e não serão enviados</p>' : ''}
             ${filesHTML}
         `;
     }
@@ -388,16 +401,42 @@ function setupUploadSystem() {
 async function uploadFiles(files) {
     const uploadBtn = document.getElementById('uploadBtn');
     const resultsDiv = document.getElementById('uploadResults');
-    
+
+    // ✅ NOVO: Validar tamanho máximo (50MB)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB em bytes
+    const invalidFiles = [];
+
+    files.forEach(file => {
+        if (file.size > MAX_FILE_SIZE) {
+            invalidFiles.push({
+                name: file.name,
+                size: formatFileSize(file.size)
+            });
+        }
+    });
+
+    // Se houver arquivos inválidos, mostrar erro
+    if (invalidFiles.length > 0) {
+        const errorMsg = invalidFiles.map(f =>
+            `${f.name} (${f.size})`
+        ).join(', ');
+
+        showToast(
+            `Arquivos muito grandes (máx 50MB): ${errorMsg}`,
+            'error'
+        );
+        return;
+    }
+
     uploadBtn.disabled = true;
     uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando...';
-    
+
     try {
         const formData = new FormData();
         files.forEach(file => {
             formData.append('files[]', file);
         });
-        
+
         const response = await fetch(`${API_BASE}/documents/upload`, {
             method: 'POST',
             headers: {
@@ -405,23 +444,23 @@ async function uploadFiles(files) {
             },
             body: formData
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showUploadResults(data.data);
             showToast(data.message, 'success');
-            
+
             selectedFiles = [];
             updateFileList();
-            
+
             if (document.getElementById('dashboardSection').classList.contains('active')) {
                 loadDashboard();
             }
         } else {
             showToast(data.message || 'Erro no upload', 'error');
         }
-        
+
     } catch (error) {
         console.error('Upload error:', error);
         showToast('Erro ao enviar arquivos', 'error');
@@ -433,10 +472,10 @@ async function uploadFiles(files) {
 
 function showUploadResults(results) {
     const resultsDiv = document.getElementById('uploadResults');
-    
+
     const successCount = results.filter(r => r.success).length;
     const totalCount = results.length;
-    
+
     let resultsHTML = `
         <div class="results-summary ${successCount === totalCount ? 'success' : 'warning'}">
             <h3>
@@ -446,22 +485,22 @@ function showUploadResults(results) {
         </div>
         <div class="results-details">
     `;
-    
+
     results.forEach(result => {
         resultsHTML += `
             <div class="result-item ${result.success ? 'success' : 'error'}">
                 <i class="fas fa-${result.success ? 'check-circle' : 'exclamation-circle'}"></i>
                 <div class="result-info">
                     <strong>${result.filename}</strong>
-                    ${result.success ? 
-                        `<p>ID: ${result.identifier} | Hash: ${result.hash?.substring(0, 8)}... | ${formatFileSize(result.size)}</p>` :
-                        `<p class="error">${result.error}</p>`
-                    }
+                    ${result.success ?
+                `<p>ID: ${result.identifier} | Hash: ${result.hash?.substring(0, 8)}... | ${formatFileSize(result.size)}</p>` :
+                `<p class="error">${result.error}</p>`
+            }
                 </div>
             </div>
         `;
     });
-    
+
     resultsHTML += '</div>';
     resultsDiv.innerHTML = resultsHTML;
 }
@@ -475,7 +514,7 @@ async function loadDocuments(page = 1) {
         const search = document.getElementById('searchInput')?.value || '';
         const status = document.getElementById('statusFilter')?.value || '';
         const docType = document.getElementById('typeFilter')?.value || '';
-        
+
         const params = new URLSearchParams({
             page: page,
             per_page: 20,
@@ -483,10 +522,10 @@ async function loadDocuments(page = 1) {
             ...(status && { status }),
             ...(docType && { doc_type: docType })
         });
-        
+
         const response = await auth.fetchWithAuth(`${API_BASE}/documents/?${params}`);
         const data = await response.json();
-        
+
         if (data.success) {
             documentsData = data.data.documents;
             displayDocuments(data.data.documents);
@@ -502,7 +541,7 @@ async function loadDocuments(page = 1) {
 
 function displayDocuments(documents) {
     const grid = document.getElementById('documentsGrid');
-    
+
     if (!documents || documents.length === 0) {
         grid.innerHTML = `
             <div class="empty-state">
@@ -513,7 +552,7 @@ function displayDocuments(documents) {
         `;
         return;
     }
-    
+
     const docsHTML = documents.map(doc => `
         <div class="document-card" data-id="${doc.id}">
             <div class="doc-header">
@@ -544,7 +583,7 @@ function displayDocuments(documents) {
             </div>
         </div>
     `).join('');
-    
+
     grid.innerHTML = docsHTML;
 }
 
@@ -556,7 +595,7 @@ async function showDocumentDetails(docId) {
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`);
         const data = await response.json();
-        
+
         if (data.success) {
             displayDocumentModal(data.data);
         } else {
@@ -571,9 +610,9 @@ async function showDocumentDetails(docId) {
 function displayDocumentModal(doc) {
     const modal = document.getElementById('documentModal');
     const details = document.getElementById('documentDetails');
-    
+
     let auditLogsHTML = '<div class="empty-state-small"><i class="fas fa-info-circle"></i> Nenhum registro encontrado</div>';
-    
+
     try {
         if (doc.audit_logs && Array.isArray(doc.audit_logs) && doc.audit_logs.length > 0) {
             const sortedLogs = [...doc.audit_logs].sort((a, b) => {
@@ -581,22 +620,22 @@ function displayDocumentModal(doc) {
                 const dateB = new Date(b.timestamp);
                 return dateB - dateA;
             });
-            
+
             auditLogsHTML = sortedLogs.map(log => {
-                const actionIcon = log.action === 'upload' ? 'cloud-upload-alt' : 
-                                 log.action === 'download' ? 'cloud-download-alt' : 
-                                 log.action === 'update' ? 'edit' : 
-                                 log.action === 'delete' ? 'trash' : 'history';
-                
+                const actionIcon = log.action === 'upload' ? 'cloud-upload-alt' :
+                    log.action === 'download' ? 'cloud-download-alt' :
+                        log.action === 'update' ? 'edit' :
+                            log.action === 'delete' ? 'trash' : 'history';
+
                 let description = log.description || 'Sem descrição';
-                
+
                 if (log.action === 'upload' && description.includes('enviado')) {
                     const match = description.match(/Documento (.+?) enviado/);
                     if (match) {
                         description = `Upload do documento ${match[1]}`;
                     }
                 }
-                
+
                 return `
                     <div class="audit-item">
                         <div class="audit-icon">
@@ -617,16 +656,16 @@ function displayDocumentModal(doc) {
         console.error('Erro ao processar audit logs:', error);
         auditLogsHTML = '<div class="error-state"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar histórico</div>';
     }
-    
+
     const statusMap = {
         'uploaded': { class: 'info', icon: 'cloud-upload-alt', text: 'Enviado' },
         'processing': { class: 'warning', icon: 'spinner', text: 'Processando' },
         'completed': { class: 'success', icon: 'check-circle', text: 'Concluído' },
         'error': { class: 'danger', icon: 'exclamation-circle', text: 'Erro' }
     };
-    
+
     const statusInfo = statusMap[doc.status] || { class: 'secondary', icon: 'info-circle', text: doc.status || 'Desconhecido' };
-    
+
     details.innerHTML = `
         <div class="modal-content-wrapper">
             <div class="modal-header-section">
@@ -664,9 +703,9 @@ function displayDocumentModal(doc) {
                         <div class="info-item">
                             <span class="info-label">Assinado</span>
                             <span class="info-value">
-                                ${doc.is_signed ? 
-                                    '<span class="badge badge-success"><i class="fas fa-check"></i> Sim</span>' : 
-                                    '<span class="badge badge-secondary"><i class="fas fa-times"></i> Não</span>'}
+                                ${doc.is_signed ?
+            '<span class="badge badge-success"><i class="fas fa-check"></i> Sim</span>' :
+            '<span class="badge badge-secondary"><i class="fas fa-times"></i> Não</span>'}
                             </span>
                         </div>
                     </div>
@@ -754,11 +793,11 @@ function displayDocumentModal(doc) {
             </div>
         </div>
     `;
-    
+
     modal.style.display = 'flex';
 }
 
-downloadDocument = async function(docId) {
+downloadDocument = async function (docId) {
     try {
         // Buscar dados do documento para pegar o nome do arquivo
         const responseData = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`);
@@ -784,7 +823,7 @@ downloadDocument = async function(docId) {
         } else {
             showToast('Erro no download', 'error');
         }
-    } catch(error) {
+    } catch (error) {
         console.error('Download error:', error);
         showToast('Erro no download', 'error');
     }
@@ -794,24 +833,24 @@ async function deleteDocument(docId) {
     if (!confirm('Tem certeza que deseja deletar este documento?')) {
         return;
     }
-    
+
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`, {
             method: 'DELETE'
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showToast('Documento deletado com sucesso', 'success');
-            
+
             loadDocuments(currentPage);
-            
+
             const dashboardSection = document.getElementById('dashboardSection');
             if (dashboardSection && dashboardSection.classList.contains('active')) {
                 loadDashboard();
             }
-            
+
         } else {
             showToast(data.message || 'Erro ao deletar', 'error');
         }
@@ -827,11 +866,11 @@ async function deleteDocument(docId) {
 
 async function loadUsers() {
     if (!auth.hasRole('admin')) return;
-    
+
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/auth/users`);
         const data = await response.json();
-        
+
         if (data.success) {
             displayUsers(data.data);
         }
@@ -842,7 +881,7 @@ async function loadUsers() {
 
 function displayUsers(users) {
     const grid = document.getElementById('usersGrid');
-    
+
     const usersHTML = users.map(user => `
         <div class="user-card">
             <div class="user-info">
@@ -859,7 +898,7 @@ function displayUsers(users) {
             </div>
         </div>
     `).join('');
-    
+
     grid.innerHTML = usersHTML;
 }
 
@@ -870,29 +909,29 @@ function displayUsers(users) {
 function setupModals() {
     const modals = document.querySelectorAll('.modal');
     const closeButtons = document.querySelectorAll('.close');
-    
+
     closeButtons.forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.target.closest('.modal').style.display = 'none';
         });
     });
-    
+
     window.addEventListener('click', (e) => {
         if (e.target.classList.contains('modal')) {
             e.target.style.display = 'none';
         }
     });
-    
+
     const addUserBtn = document.getElementById('addUserBtn');
     const addUserModal = document.getElementById('addUserModal');
     const addUserForm = document.getElementById('addUserForm');
-    
+
     if (addUserBtn) {
         addUserBtn.addEventListener('click', () => {
             addUserModal.style.display = 'flex';
         });
     }
-    
+
     if (addUserForm) {
         addUserForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -906,15 +945,15 @@ async function createUser() {
     const email = document.getElementById('userEmail').value;
     const password = document.getElementById('userPassword').value;
     const role = document.getElementById('userRole').value;
-    
+
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/auth/users`, {
             method: 'POST',
             body: JSON.stringify({ name, email, password, role })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showToast('Usuário criado com sucesso', 'success');
             document.getElementById('addUserModal').style.display = 'none';
@@ -976,7 +1015,7 @@ function formatDate(dateString, format = 'long') {
 
 function formatFileSize(bytes) {
     if (!bytes || isNaN(bytes)) return 'N/A';
-    
+
     try {
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(1024));
@@ -989,12 +1028,12 @@ function formatFileSize(bytes) {
 
 function updatePagination(pagination) {
     const paginationDiv = document.getElementById('pagination');
-    
+
     if (!pagination || pagination.pages <= 1) {
         paginationDiv.innerHTML = '';
         return;
     }
-    
+
     let paginationHTML = `
         <div class="pagination-info">
             Página ${pagination.current_page} de ${pagination.pages} 
@@ -1002,7 +1041,7 @@ function updatePagination(pagination) {
         </div>
         <div class="pagination-buttons">
     `;
-    
+
     if (pagination.current_page > 1) {
         paginationHTML += `
             <button onclick="loadDocuments(${pagination.current_page - 1})" class="btn-secondary">
@@ -1010,10 +1049,10 @@ function updatePagination(pagination) {
             </button>
         `;
     }
-    
+
     const startPage = Math.max(1, pagination.current_page - 2);
     const endPage = Math.min(pagination.pages, pagination.current_page + 2);
-    
+
     for (let i = startPage; i <= endPage; i++) {
         paginationHTML += `
             <button onclick="loadDocuments(${i})" class="btn-${i === pagination.current_page ? 'primary' : 'secondary'}">
@@ -1021,7 +1060,7 @@ function updatePagination(pagination) {
             </button>
         `;
     }
-    
+
     if (pagination.current_page < pagination.pages) {
         paginationHTML += `
             <button onclick="loadDocuments(${pagination.current_page + 1})" class="btn-secondary">
@@ -1029,7 +1068,7 @@ function updatePagination(pagination) {
             </button>
         `;
     }
-    
+
     paginationHTML += '</div>';
     paginationDiv.innerHTML = paginationHTML;
 }
@@ -1042,7 +1081,7 @@ setTimeout(() => {
             loadDocuments(1);
         });
     }
-    
+
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
         searchInput.addEventListener('keypress', (e) => {

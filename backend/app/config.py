@@ -7,6 +7,13 @@ class Config:
     # Flask
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     
+    #Tamanho máximo de arquivo (50MB)
+    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50 MB em bytes
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+    
+    # Mensagem de erro personalizada
+    MAX_FILE_SIZE_MB = 50
+    
     # Database
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///camps.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
