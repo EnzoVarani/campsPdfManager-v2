@@ -415,6 +415,89 @@ def delete_document(doc_id):
             'message': f'Erro ao deletar: {str(e)}'
         }), 500
 
+@documents_bp.route('/delete_many', methods=['POST'])
+@jwt_required()
+@user_required
+def delete_many_documents():
+    """Deleta múltiplos documentos de uma vez"""
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    
+    document_ids = data.get('document_ids', [])
+    
+    if not document_ids or not isinstance(document_ids, list):
+        return jsonify({
+            'success': False,
+            'message': 'Nenhum documento selecionado'
+        }), 400
+    
+    if len(document_ids) > 100:
+        return jsonify({
+            'success': False,
+            'message': 'Máximo de 100 documentos por vez'
+        }), 400
+    
+    deleted_count = 0
+    errors = []
+    
+    try:
+        for doc_id in document_ids:
+            try:
+                document = Document.query.get(doc_id)
+                
+                if not document:
+                    errors.append({
+                        'id': doc_id,
+                        'error': 'Documento não encontrado'
+                    })
+                    continue
+                
+                # Log de auditoria ANTES de deletar
+                audit = AuditLog(
+                    document_id=document.id,
+                    user_id=current_user_id,
+                    action='document_deleted',
+                    description=f'Documento "{document.title or document.original_filename}" deletado (deleção em lote)',
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
+                )
+                db.session.add(audit)
+                db.session.flush()
+                
+                # Remover arquivos físicos
+                if document.original_path and os.path.exists(document.original_path):
+                    os.remove(document.original_path)
+                
+                if document.processed_path and os.path.exists(document.processed_path):
+                    os.remove(document.processed_path)
+                
+                # Deletar documento
+                db.session.delete(document)
+                deleted_count += 1
+                
+            except Exception as e:
+                errors.append({
+                    'id': doc_id,
+                    'error': str(e)
+                })
+                continue
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'{deleted_count} de {len(document_ids)} documentos deletados',
+            'deleted': deleted_count,
+            'errors': errors
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao deletar documentos: {str(e)}'
+        }), 500
+
 @documents_bp.route('/stats', methods=['GET'])
 @jwt_required()
 def document_stats():

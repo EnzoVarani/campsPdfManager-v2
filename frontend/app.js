@@ -7,6 +7,7 @@ const API_BASE = 'http://localhost:5000/api';
 let currentPage = 1;
 let documentsData = [];
 let chartsInstances = {};
+let selectedDocumentIds = new Set();
 
 // =============================================================================
 // NAVIGATION
@@ -541,7 +542,8 @@ async function loadDocuments(page = 1) {
 
 function displayDocuments(documents) {
     const grid = document.getElementById('documentsGrid');
-
+    const bulkActionsBar = document.getElementById('bulkActionsBar');
+    
     if (!documents || documents.length === 0) {
         grid.innerHTML = `
             <div class="empty-state">
@@ -550,11 +552,26 @@ function displayDocuments(documents) {
                 <p>Faça upload de alguns PDFs para começar</p>
             </div>
         `;
+        bulkActionsBar.style.display = 'none';
         return;
     }
-
+    
+    // ✅ Mostrar barra de ações se houver documentos
+    bulkActionsBar.style.display = 'flex';
+    
     const docsHTML = documents.map(doc => `
-        <div class="document-card" data-id="${doc.id}">
+        <div class="document-card ${selectedDocumentIds.has(doc.id) ? 'selected' : ''}" data-id="${doc.id}">
+            <!-- ✅ NOVO: Checkbox de seleção -->
+            <div class="doc-checkbox-container">
+                <input 
+                    type="checkbox" 
+                    class="doc-checkbox" 
+                    data-doc-id="${doc.id}"
+                    ${selectedDocumentIds.has(doc.id) ? 'checked' : ''}
+                    onclick="toggleDocumentSelection(${doc.id})"
+                />
+            </div>
+            
             <div class="doc-header">
                 <h3>${doc.title || doc.original_filename}</h3>
                 <span class="doc-id">${doc.identifier}</span>
@@ -583,8 +600,9 @@ function displayDocuments(documents) {
             </div>
         </div>
     `).join('');
-
+    
     grid.innerHTML = docsHTML;
+    updateBulkActionsUI();
 }
 
 // =============================================================================
@@ -1092,3 +1110,138 @@ setTimeout(() => {
         });
     }
 }, 1000);
+
+// =============================================================================
+// SELEÇÃO MÚLTIPLA DE DOCUMENTOS
+// =============================================================================
+
+function toggleDocumentSelection(docId) {
+    const card = document.querySelector(`.document-card[data-id="${docId}"]`);
+    const checkbox = card.querySelector('.doc-checkbox');
+    
+    if (checkbox.checked) {
+        selectedDocumentIds.add(docId);
+        card.classList.add('selected');
+    } else {
+        selectedDocumentIds.delete(docId);
+        card.classList.remove('selected');
+    }
+    
+    updateBulkActionsUI();
+}
+
+function updateBulkActionsUI() {
+    const selectAllCheckbox = document.getElementById('selectAllDocs');
+    const selectedCount = document.getElementById('selectedCount');
+    const downloadBtn = document.getElementById('downloadSelectedBtn');
+    const deleteBtn = document.getElementById('deleteSelectedBtn');
+    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
+    
+    // Atualizar contador
+    selectedCount.textContent = `(${selectedDocumentIds.size} selecionados)`;
+    
+    // Atualizar checkbox "Selecionar Todos"
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = allCheckboxes.length > 0 && 
+                                     selectedDocumentIds.size === allCheckboxes.length;
+        selectAllCheckbox.indeterminate = selectedDocumentIds.size > 0 && 
+                                          selectedDocumentIds.size < allCheckboxes.length;
+    }
+    
+    // Ativar/desativar botões
+    const hasSelection = selectedDocumentIds.size > 0;
+    downloadBtn.disabled = !hasSelection;
+    deleteBtn.disabled = !hasSelection;
+}
+
+// Selecionar/Desselecionar todos
+document.addEventListener('DOMContentLoaded', function() {
+    const selectAllCheckbox = document.getElementById('selectAllDocs');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.doc-checkbox');
+            checkboxes.forEach(checkbox => {
+                const docId = parseInt(checkbox.dataset.docId);
+                checkbox.checked = selectAllCheckbox.checked;
+                
+                if (selectAllCheckbox.checked) {
+                    selectedDocumentIds.add(docId);
+                    checkbox.closest('.document-card').classList.add('selected');
+                } else {
+                    selectedDocumentIds.delete(docId);
+                    checkbox.closest('.document-card').classList.remove('selected');
+                }
+            });
+            updateBulkActionsUI();
+        });
+    }
+});
+
+// Download múltiplo
+document.addEventListener('DOMContentLoaded', function() {
+    const downloadBtn = document.getElementById('downloadSelectedBtn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', async function() {
+            if (selectedDocumentIds.size === 0) return;
+            
+            showToast(`Iniciando download de ${selectedDocumentIds.size} arquivos...`, 'info');
+            
+            // Download com delay para não sobrecarregar
+            const ids = Array.from(selectedDocumentIds);
+            for (let i = 0; i < ids.length; i++) {
+                await downloadDocument(ids[i]);
+                // Pequeno delay entre downloads
+                if (i < ids.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+            
+            showToast('Downloads concluídos!', 'success');
+        });
+    }
+});
+
+// Deleção múltipla
+document.addEventListener('DOMContentLoaded', function() {
+    const deleteBtn = document.getElementById('deleteSelectedBtn');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', async function() {
+            if (selectedDocumentIds.size === 0) return;
+            
+            const count = selectedDocumentIds.size;
+            if (!confirm(`Tem certeza que deseja deletar ${count} documentos selecionados?`)) {
+                return;
+            }
+            
+            try {
+                const ids = Array.from(selectedDocumentIds);
+                const response = await auth.fetchWithAuth(`${API_BASE}/documents/delete_many`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ document_ids: ids })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast(`${data.deleted} documentos deletados com sucesso!`, 'success');
+                    selectedDocumentIds.clear();
+                    loadDocuments(currentPage);
+                    
+                    // Atualizar dashboard se estiver ativo
+                    const dashboardSection = document.getElementById('dashboardSection');
+                    if (dashboardSection && dashboardSection.classList.contains('active')) {
+                        loadDashboard();
+                    }
+                } else {
+                    showToast(data.message || 'Erro ao deletar documentos', 'error');
+                }
+            } catch (error) {
+                console.error('Delete multiple error:', error);
+                showToast('Erro ao deletar documentos', 'error');
+            }
+        });
+    }
+});
