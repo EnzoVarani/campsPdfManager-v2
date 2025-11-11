@@ -1,6 +1,7 @@
 """
 Rotas para gerenciamento de documentos com autenticação JWT
 """
+
 import uuid
 from app.services.batch_processor import batch_processor
 from app.services.metadata_validator import MetadataValidator
@@ -11,13 +12,14 @@ from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 import os
 from datetime import datetime
-
-from app.models import Document, AuditLog, db
+from app.extensions import db
+from app.models import Document, AuditLog
 from app.services.pdf_service import PDFService
-from app.utils.helpers import generate_identifier, allowed_file
+from app.utils.helpers import allowed_file
 from app.utils.decorators import admin_required, user_required
 
 documents_bp = Blueprint('documents', __name__)
+
 
 @documents_bp.errorhandler(RequestEntityTooLarge)
 def handle_file_too_large(e):
@@ -27,12 +29,25 @@ def handle_file_too_large(e):
         'message': f'Arquivo muito grande! Tamanho máximo permitido: {max_size_mb}MB'
     }), 413
 
+
+def formatFileSize(bytes_size):
+    """Formata bytes em formato legível"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_size < 1024.0:
+            return f"{bytes_size:.2f} {unit}"
+        bytes_size /= 1024.0
+    return f"{bytes_size:.2f} TB"
+
+
 @documents_bp.route('/upload', methods=['POST'])
 @jwt_required()
 @user_required
 def upload_documents():
     """Upload de múltiplos PDFs com autenticação"""
     current_user_id = get_jwt_identity()
+    
+    # ✅ CORREÇÃO: Converter para int
+    user_id_int = int(current_user_id)
     
     # Obter arquivos do request
     files = []
@@ -43,25 +58,24 @@ def upload_documents():
     if 'file' in request.files:
         files.append(request.files['file'])
     
-    if not files:
+    if not files or files[0].filename == '':
         return jsonify({'success': False, 'message': 'Nenhum arquivo enviado'}), 400
-    
-    if files[0].filename == '':
-        return jsonify({'success': False, 'message': 'Nenhum arquivo selecionado'}), 400
     
     results = []
     upload_folder = current_app.config['UPLOAD_FOLDER']
     max_file_size = current_app.config['MAX_FILE_SIZE']
     max_file_size_mb = current_app.config['MAX_FILE_SIZE_MB']
+    
     pdf_service = PDFService()
     
     for file in files:
         if not isinstance(file, FileStorage) or not file or not file.filename:
             continue
         
-        file.seek(0, 2)  # Move para o final do arquivo
-        file_size = file.tell()  # Pega o tamanho
-        file.seek(0)  # Volta para o início
+        # Verificar tamanho
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
         
         if file_size > max_file_size:
             results.append({
@@ -70,7 +84,7 @@ def upload_documents():
                 'error': f'Arquivo muito grande ({formatFileSize(file_size)}). Máximo permitido: {max_file_size_mb}MB'
             })
             continue
-
+        
         if not allowed_file(file.filename):
             results.append({
                 'filename': file.filename,
@@ -99,42 +113,47 @@ def upload_documents():
                 })
                 continue
             
-            # Calcular informações do arquivo
+            # Calcular hash
             file_hash = pdf_service.calculate_hash(filepath)
-            file_size = pdf_service.get_file_size(filepath)
-            page_count = pdf_service.get_page_count(filepath)
-            identifier = generate_identifier(current_app.config['ID_PREFIX'])
             
-            # Criar registro no banco
+            # Verificar duplicata
+            existing = Document.query.filter_by(file_hash=file_hash).first()
+            if existing:
+                os.remove(filepath)
+                results.append({
+                    'filename': filename,
+                    'success': False,
+                    'error': 'Arquivo duplicado já existe no sistema'
+                })
+                continue
+            
+            # Informações do arquivo
+            page_count = pdf_service.get_page_count(filepath)
+            
+            # ✅ CORREÇÃO CRÍTICA: Usar apenas campos que existem no modelo
             document = Document(
-                identifier=identifier,
-                title=filename.replace('.pdf', ''),
-                author='',
-                subject='',
-                doc_type='',
-                digitalization_date=datetime.utcnow(),
-                digitalization_location=current_app.config['DEFAULT_LOCATION'],
-                responsible='',
+                filename=unique_filename,
                 original_filename=filename,
-                original_path=filepath,
-                hash_sha256=file_hash,
+                file_path=filepath,
                 file_size=file_size,
-                created_by=current_user_id,
-                status='uploaded'
+                file_hash=file_hash,
+                title=filename.replace('.pdf', ''),
+                uploaded_by=user_id_int
             )
             
             db.session.add(document)
-            db.session.flush()  # Força ID antes do log
+            db.session.flush()
             
             # Log de auditoria
             audit = AuditLog(
                 document_id=document.id,
-                user_id=current_user_id,
+                user_id=user_id_int,
                 action='upload',
                 description=f'Documento {filename} enviado ({page_count} páginas)',
                 ip_address=request.remote_addr,
                 user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
             )
+            
             db.session.add(audit)
             db.session.commit()
             
@@ -142,7 +161,6 @@ def upload_documents():
                 'filename': filename,
                 'success': True,
                 'document_id': document.id,
-                'identifier': identifier,
                 'hash': file_hash,
                 'size': file_size,
                 'pages': page_count
@@ -150,6 +168,8 @@ def upload_documents():
             
         except Exception as e:
             db.session.rollback()
+            if os.path.exists(filepath):
+                os.remove(filepath)
             results.append({
                 'filename': getattr(file, 'filename', 'unknown'),
                 'success': False,
@@ -164,20 +184,12 @@ def upload_documents():
         'data': results
     }), 200
 
-def formatFileSize(bytes):
-    """Formata bytes em formato legível"""
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if bytes < 1024.0:
-            return f"{bytes:.2f} {unit}"
-        bytes /= 1024.0
-    return f"{bytes:.2f} TB"
 
 @documents_bp.route('/', methods=['GET'])
 @jwt_required()
 def list_documents():
     """Lista documentos com filtros e paginação"""
     current_user_id = get_jwt_identity()
-    
     query = Document.query
     
     # Filtros
@@ -187,7 +199,7 @@ def list_documents():
             db.or_(
                 Document.title.ilike(f'%{search}%'),
                 Document.author.ilike(f'%{search}%'),
-                Document.identifier.ilike(f'%{search}%')
+                Document.original_filename.ilike(f'%{search}%')
             )
         )
     
@@ -195,15 +207,11 @@ def list_documents():
     if doc_type:
         query = query.filter(Document.doc_type == doc_type)
     
-    status = request.args.get('status')
-    if status:
-        query = query.filter(Document.status == status)
-    
     # Paginação
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     
-    pagination = query.order_by(Document.created_at.desc()).paginate(
+    pagination = query.order_by(Document.uploaded_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
     
@@ -219,6 +227,7 @@ def list_documents():
             }
         }
     }), 200
+
 
 @documents_bp.route('/<int:doc_id>', methods=['GET'])
 @jwt_required()
@@ -236,69 +245,37 @@ def get_document(doc_id):
         'data': doc_dict
     }), 200
 
+
 @documents_bp.route('/<int:doc_id>/metadata', methods=['POST'])
 @jwt_required()
 @user_required
 def add_metadata(doc_id):
     """Adiciona metadados a um documento"""
     current_user_id = get_jwt_identity()
+    user_id_int = int(current_user_id)
+    
     document = Document.query.get_or_404(doc_id)
     data = request.get_json() or {}
     
-    required = ['title', 'author', 'doc_type', 'responsible']
-    missing = [f for f in required if not data.get(f)]
-    if missing:
-        return jsonify({
-            'success': False,
-            'message': f'Campos obrigatórios: {", ".join(missing)}'
-        }), 400
-    
     try:
-        # Atualizar metadados do documento
-        document.title = data['title']
-        document.subject = data.get('subject', '')
-        document.author = data['author']
-        document.doc_type = data['doc_type']
-        document.responsible = data['responsible']
-        document.status = 'metadata_added'
+        # Atualizar metadados
+        if 'title' in data:
+            document.title = data['title']
+        if 'subject' in data:
+            document.subject = data['subject']
+        if 'author' in data:
+            document.author = data['author']
+        if 'doc_type' in data:
+            document.doc_type = data['doc_type']
+        if 'keywords' in data:
+            document.keywords = data['keywords']
         
-        # Preparar metadados para o PDF
-        metadata = {
-            'title': document.title,
-            'subject': document.subject,
-            'author': document.author,
-            'identifier': document.identifier,
-            'doc_type': document.doc_type,
-            'digitalization_date': document.digitalization_date.isoformat(),
-            'digitalization_location': document.digitalization_location,
-            'responsible': document.responsible,
-            'hash_sha256': document.hash_sha256
-        }
-        
-        # Processar PDF
-        pdf_service = PDFService()
-        processed_folder = current_app.config['PROCESSED_FOLDER']
-        output_filename = f"processed_{document.identifier}.pdf"
-        output_path = os.path.join(processed_folder, output_filename)
-        
-        success, message = pdf_service.add_metadata(
-            document.original_path,
-            metadata,
-            output_path
-        )
-        
-        if not success:
-            return jsonify({
-                'success': False,
-                'message': f'Erro ao processar PDF: {message}'
-            }), 500
-        
-        document.processed_path = output_path
+        db.session.commit()
         
         # Log de auditoria
         audit = AuditLog(
             document_id=document.id,
-            user_id=current_user_id,
+            user_id=user_id_int,
             action='metadata_added',
             description=f'Metadados adicionados: {document.title}',
             ip_address=request.remote_addr,
@@ -320,21 +297,18 @@ def add_metadata(doc_id):
             'message': f'Erro interno: {str(e)}'
         }), 500
 
+
 @documents_bp.route('/<int:doc_id>/download', methods=['GET'])
 @jwt_required()
 def download_document(doc_id):
     """Download do PDF"""
     current_user_id = get_jwt_identity()
+    user_id_int = int(current_user_id)
+    
     document = Document.query.get_or_404(doc_id)
     
-    # Escolher arquivo (processado tem prioridade)
-    if document.processed_path and os.path.exists(document.processed_path):
-        file_path = document.processed_path
-        file_type = 'processed'
-    elif document.original_path and os.path.exists(document.original_path):
-        file_path = document.original_path
-        file_type = 'original'
-    else:
+    # Verificar se arquivo existe
+    if not document.file_path or not os.path.exists(document.file_path):
         return jsonify({
             'success': False,
             'message': 'Arquivo não encontrado'
@@ -343,9 +317,9 @@ def download_document(doc_id):
     # Log de auditoria
     audit = AuditLog(
         document_id=document.id,
-        user_id=current_user_id,
+        user_id=user_id_int,
         action='download',
-        description=f'Download do arquivo {file_type}',
+        description=f'Download do arquivo',
         ip_address=request.remote_addr,
         user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
     )
@@ -353,61 +327,46 @@ def download_document(doc_id):
     db.session.commit()
     
     return send_file(
-        file_path,
+        document.file_path,
         as_attachment=True,
-        download_name=f"{document.identifier}.pdf"
+        download_name=document.original_filename
     )
+
 
 @documents_bp.route('/<int:doc_id>', methods=['DELETE'])
 @jwt_required()
 @user_required
 def delete_document(doc_id):
-    """Deleta um documento com auditoria completa"""
+    """Deleta um documento"""
     current_user_id = get_jwt_identity()
+    user_id_int = int(current_user_id)
+    
     document = Document.query.get_or_404(doc_id)
     
     try:
-        # Log de auditoria ANTES de deletar
+        # Log ANTES de deletar
         audit = AuditLog(
             document_id=document.id,
-            user_id=current_user_id,
+            user_id=user_id_int,
             action='document_deleted',
             description=f'Documento "{document.title or document.original_filename}" deletado',
             ip_address=request.remote_addr,
             user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
         )
         db.session.add(audit)
-        db.session.flush()  # Força inserção do log
+        db.session.flush()
         
-        # Remover arquivos físicos
-        files_removed = []
-        if document.original_path and os.path.exists(document.original_path):
-            os.remove(document.original_path)
-            files_removed.append('original')
+        # Remover arquivo físico
+        if document.file_path and os.path.exists(document.file_path):
+            os.remove(document.file_path)
         
-        if document.processed_path and os.path.exists(document.processed_path):
-            os.remove(document.processed_path)
-            files_removed.append('processed')
-        
-        # Salvar informações para resposta
-        doc_info = {
-            'id': document.id,
-            'identifier': document.identifier,
-            'title': document.title
-        }
-        
-        # Deletar documento (cascata deleta logs)
+        # Deletar do banco
         db.session.delete(document)
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'message': 'Documento deletado com sucesso',
-            'data': {
-                'document_id': doc_info['id'],
-                'identifier': doc_info['identifier'],
-                'files_removed': files_removed
-            }
+            'message': 'Documento deletado com sucesso'
         }), 200
         
     except Exception as e:
@@ -417,14 +376,16 @@ def delete_document(doc_id):
             'message': f'Erro ao deletar: {str(e)}'
         }), 500
 
+
 @documents_bp.route('/delete_many', methods=['POST'])
 @jwt_required()
 @user_required
 def delete_many_documents():
-    """Deleta múltiplos documentos de uma vez"""
+    """Deleta múltiplos documentos"""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
+    user_id_int = int(current_user_id)
     
+    data = request.get_json() or {}
     document_ids = data.get('document_ids', [])
     
     if not document_ids or not isinstance(document_ids, list):
@@ -446,42 +407,31 @@ def delete_many_documents():
         for doc_id in document_ids:
             try:
                 document = Document.query.get(doc_id)
-                
                 if not document:
-                    errors.append({
-                        'id': doc_id,
-                        'error': 'Documento não encontrado'
-                    })
+                    errors.append({'id': doc_id, 'error': 'Documento não encontrado'})
                     continue
                 
-                # Log de auditoria ANTES de deletar
+                # Log antes de deletar
                 audit = AuditLog(
                     document_id=document.id,
-                    user_id=current_user_id,
+                    user_id=user_id_int,
                     action='document_deleted',
-                    description=f'Documento "{document.title or document.original_filename}" deletado (deleção em lote)',
+                    description=f'Documento "{document.title or document.original_filename}" deletado (lote)',
                     ip_address=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
                 )
                 db.session.add(audit)
                 db.session.flush()
                 
-                # Remover arquivos físicos
-                if document.original_path and os.path.exists(document.original_path):
-                    os.remove(document.original_path)
+                # Remover arquivo
+                if document.file_path and os.path.exists(document.file_path):
+                    os.remove(document.file_path)
                 
-                if document.processed_path and os.path.exists(document.processed_path):
-                    os.remove(document.processed_path)
-                
-                # Deletar documento
                 db.session.delete(document)
                 deleted_count += 1
                 
             except Exception as e:
-                errors.append({
-                    'id': doc_id,
-                    'error': str(e)
-                })
+                errors.append({'id': doc_id, 'error': str(e)})
                 continue
         
         db.session.commit()
@@ -500,17 +450,16 @@ def delete_many_documents():
             'message': f'Erro ao deletar documentos: {str(e)}'
         }), 500
 
+
 @documents_bp.route('/batch/metadata', methods=['POST'])
 @jwt_required()
 @user_required
 def batch_add_metadata():
-    """
-    Adiciona metadados em lote para múltiplos documentos
-    Processa de forma assíncrona usando sistema de fila
-    """
+    """Adiciona metadados em lote"""
     current_user_id = get_jwt_identity()
-    data = request.get_json() or {}
+    user_id_int = int(current_user_id)
     
+    data = request.get_json() or {}
     document_ids = data.get('document_ids', [])
     metadata = data.get('metadata', {})
     
@@ -552,15 +501,15 @@ def batch_add_metadata():
             'message': 'Um ou mais documentos não foram encontrados'
         }), 404
     
-    # Gerar ID único para a tarefa
+    # Gerar ID da tarefa
     task_id = str(uuid.uuid4())
     
-    # Submeter para processamento assíncrono
+    # Submeter para processamento
     batch_processor.submit_task(
         task_id=task_id,
         document_ids=document_ids,
         metadata=metadata,
-        user_id=current_user_id,
+        user_id=user_id_int,
         ip_address=request.remote_addr
     )
     
@@ -575,7 +524,7 @@ def batch_add_metadata():
 @documents_bp.route('/batch/status/<task_id>', methods=['GET'])
 @jwt_required()
 def get_batch_status(task_id):
-    """Retorna o status de uma tarefa de processamento em lote"""
+    """Retorna status de processamento em lote"""
     task_status = batch_processor.get_task_status(task_id)
     
     if not task_status:
@@ -593,6 +542,7 @@ def get_batch_status(task_id):
         'result': task_status.get('result')
     }), 200
 
+
 @documents_bp.route('/stats', methods=['GET'])
 @jwt_required()
 def document_stats():
@@ -600,7 +550,7 @@ def document_stats():
     total = Document.query.count()
     signed = Document.query.filter_by(is_signed=True).count()
     today = Document.query.filter(
-        db.func.date(Document.created_at) == datetime.utcnow().date()
+        db.func.date(Document.uploaded_at) == datetime.utcnow().date()
     ).count()
     
     return jsonify({
