@@ -45,8 +45,6 @@ def formatFileSize(bytes_size):
 def upload_documents():
     """Upload de múltiplos PDFs com autenticação"""
     current_user_id = get_jwt_identity()
-    
-    # ✅ CORREÇÃO: Converter para int
     user_id_int = int(current_user_id)
     
     # Obter arquivos do request
@@ -130,14 +128,18 @@ def upload_documents():
             # Informações do arquivo
             page_count = pdf_service.get_page_count(filepath)
             
-            # ✅ CORREÇÃO CRÍTICA: Usar apenas campos que existem no modelo
+            # ✅ CORREÇÃO 1: Title automático com "Prontuário de"
+            clean_filename = filename.replace('.pdf', '').replace('.PDF', '')
+            auto_title = f"Prontuário de {clean_filename}"
+            
+            # Criar documento
             document = Document(
                 filename=unique_filename,
                 original_filename=filename,
                 file_path=filepath,
                 file_size=file_size,
                 file_hash=file_hash,
-                title=filename.replace('.pdf', ''),
+                title=auto_title,  # ✅ TITLE AUTOMÁTICO
                 uploaded_by=user_id_int
             )
             
@@ -149,7 +151,7 @@ def upload_documents():
                 document_id=document.id,
                 user_id=user_id_int,
                 action='upload',
-                description=f'Documento {filename} enviado ({page_count} páginas)',
+                description=f'Documento "{auto_title}" enviado ({page_count} páginas)',
                 ip_address=request.remote_addr,
                 user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
             )
@@ -161,6 +163,7 @@ def upload_documents():
                 'filename': filename,
                 'success': True,
                 'document_id': document.id,
+                'title': auto_title,  # ✅ Retornar o título gerado
                 'hash': file_hash,
                 'size': file_size,
                 'pages': page_count
@@ -205,7 +208,8 @@ def list_documents():
     
     doc_type = request.args.get('doc_type')
     if doc_type:
-        query = query.filter(Document.doc_type == doc_type)
+        # ✅ CORREÇÃO 2: Normalizar doc_type na busca também
+        query = query.filter(Document.doc_type == doc_type.lower())
     
     # Paginação
     page = request.args.get('page', 1, type=int)
@@ -266,7 +270,8 @@ def add_metadata(doc_id):
         if 'author' in data:
             document.author = data['author']
         if 'doc_type' in data:
-            document.doc_type = data['doc_type']
+            # ✅ CORREÇÃO 2: Normalizar para minúsculo
+            document.doc_type = data['doc_type'].lower() if data['doc_type'] else None
         if 'keywords' in data:
             document.keywords = data['keywords']
         
@@ -481,6 +486,10 @@ def batch_add_metadata():
             'success': False,
             'message': 'Metadados são obrigatórios'
         }), 400
+    
+    # ✅ CORREÇÃO 2: Normalizar doc_type ANTES de validar
+    if 'doc_type' in metadata and metadata['doc_type']:
+        metadata['doc_type'] = metadata['doc_type'].lower()
     
     # Validar metadados
     validator = MetadataValidator()

@@ -13,7 +13,7 @@ class MetadataValidator:
     """Validador de metadados seguindo padrões brasileiros"""
     
     # Campos obrigatórios
-    REQUIRED_FIELDS = ['title', 'author', 'doc_type']
+    REQUIRED_FIELDS = ['author', 'doc_type']
     
     # Tipos de documentos válidos
     VALID_DOC_TYPES = [
