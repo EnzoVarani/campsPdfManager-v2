@@ -4,9 +4,9 @@ Rotas de autenticação e gestão de usuários
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import (
-    create_access_token, 
+    create_access_token,
     create_refresh_token,
-    jwt_required, 
+    jwt_required,
     get_jwt_identity,
     get_jwt
 )
@@ -65,21 +65,18 @@ def login():
 @auth_bp.route('/refresh', methods=['POST'])
 @jwt_required(refresh=True)
 def refresh():
-    """
-    Renovar access token usando refresh token
-    ---
-    POST /api/auth/refresh
-    Header: Authorization: Bearer {refresh_token}
-    """
+    """Renovar access token usando refresh token"""
     user_id = get_jwt_identity()
-    user = User.query.get(user_id)
+    
+    # ✅ CORREÇÃO 1: Converter string para int
+    user = User.query.get(int(user_id))
     
     if not user or not user.is_active:
         return jsonify({'error': 'Usuário inválido ou inativo'}), 403
     
     # Gerar novo access token
     access_token = create_access_token(
-        identity=user_id,
+        identity=str(user.id),
         additional_claims={"role": user.role.value, "name": user.name}
     )
     
@@ -91,19 +88,23 @@ def refresh():
 @auth_bp.route('/me', methods=['GET'])
 @jwt_required()
 def get_current_user():
-    """
-    Retorna dados do usuário autenticado
-    ---
-    GET /api/auth/me
-    Header: Authorization: Bearer {access_token}
-    """
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    
-    if not user:
-        return jsonify({'error': 'Usuário não encontrado'}), 404
-    
-    return jsonify(user.to_dict()), 200
+    """Retorna dados do usuário autenticado"""
+    try:
+        user_id = get_jwt_identity()
+        
+        # ✅ CORREÇÃO 2: Converter string para int
+        user = User.query.get(int(user_id))
+        
+        if not user:
+            return jsonify({'error': 'Usuário não encontrado'}), 404
+        
+        return jsonify(user.to_dict()), 200
+        
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'type': type(e).__name__
+        }), 500
 
 
 @auth_bp.route('/logout', methods=['POST'])
@@ -128,7 +129,9 @@ def list_users():
     Header: Authorization: Bearer {access_token}
     """
     user_id = get_jwt_identity()
-    current_user = User.query.get(user_id)
+    
+    # ✅ CORREÇÃO 3: Converter string para int
+    current_user = User.query.get(int(user_id))
     
     # Verificar se é admin
     if not current_user or not current_user.has_permission('manage_users'):
@@ -159,7 +162,9 @@ def create_user():
     }
     """
     user_id = get_jwt_identity()
-    current_user = User.query.get(user_id)
+    
+    # ✅ CORREÇÃO 4: Converter string para int
+    current_user = User.query.get(int(user_id))
     
     # Verificar se é admin
     if not current_user or not current_user.has_permission('manage_users'):
@@ -223,7 +228,9 @@ def update_user(user_id):
     Body: { "name": "Novo Nome", "role": "admin", "is_active": true }
     """
     current_user_id = get_jwt_identity()
-    current_user = User.query.get(current_user_id)
+    
+    # ✅ CORREÇÃO 5: Converter string para int
+    current_user = User.query.get(int(current_user_id))
     
     # Verificar se é admin
     if not current_user or not current_user.has_permission('manage_users'):
@@ -276,14 +283,16 @@ def delete_user(user_id):
     Header: Authorization: Bearer {access_token}
     """
     current_user_id = get_jwt_identity()
-    current_user = User.query.get(current_user_id)
+    
+    # ✅ CORREÇÃO 6: Converter string para int
+    current_user = User.query.get(int(current_user_id))
     
     # Verificar se é admin
     if not current_user or not current_user.has_permission('manage_users'):
         return jsonify({'error': 'Acesso negado'}), 403
     
     # Não pode deletar a si mesmo
-    if user_id == current_user_id:
+    if user_id == int(current_user_id):
         return jsonify({'error': 'Não é possível deletar seu próprio usuário'}), 400
     
     # Buscar usuário
@@ -311,7 +320,9 @@ def change_password():
     Body: { "current_password": "antiga", "new_password": "nova" }
     """
     user_id = get_jwt_identity()
-    user = User.query.get(user_id)
+    
+    # ✅ CORREÇÃO 7: Converter string para int
+    user = User.query.get(int(user_id))
     
     if not user:
         return jsonify({'error': 'Usuário não encontrado'}), 404

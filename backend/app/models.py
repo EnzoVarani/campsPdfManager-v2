@@ -5,8 +5,6 @@ Modelos do banco de dados (User, Document, AuditLog)
 from datetime import datetime
 from enum import Enum
 from flask_jwt_extended import create_access_token, create_refresh_token
-
-# ✅ IMPORTAR das extensions
 from app.extensions import db, bcrypt
 
 
@@ -18,31 +16,41 @@ class UserRole(Enum):
 
 class User(db.Model):
     __tablename__ = 'users'
+    
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.Enum(UserRole), nullable=False, default=UserRole.USER)
     is_active = db.Column(db.Boolean, default=True)
-
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = db.Column(db.DateTime)
-
+    
     documents = db.relationship('Document', back_populates='uploader', lazy='dynamic')
     audit_logs = db.relationship('AuditLog', back_populates='user', lazy='dynamic')
-
+    
     def set_password(self, password: str):
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
-
+    
     def check_password(self, password: str) -> bool:
         return bcrypt.check_password_hash(self.password_hash, password)
-
+    
     def generate_tokens(self):
-        claims = {"role": self.role.value, "name": self.name}
+        claims = {
+            "role": self.role.value,
+            "name": self.name
+        }
+        
         return {
-            'access_token': create_access_token(identity=self.id, additional_claims=claims),
-            'refresh_token': create_refresh_token(identity=self.id)
+            'access_token': create_access_token(
+                identity=str(self.id),  # ✅ CONVERTER PARA STRING
+                additional_claims=claims
+            ),
+            'refresh_token': create_refresh_token(
+                identity=str(self.id)  # ✅ CONVERTER PARA STRING
+            )
         }
 
     def has_permission(self, permission: str) -> bool:
@@ -52,7 +60,7 @@ class User(db.Model):
             UserRole.VIEWER: ['read']
         }
         return permission in permissions.get(self.role, [])
-
+    
     def to_dict(self):
         return {
             'id': self.id,
@@ -63,6 +71,7 @@ class User(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'last_login': self.last_login.isoformat() if self.last_login else None
         }
+
 
 class Document(db.Model):
     __tablename__ = 'documents'
@@ -93,7 +102,7 @@ class Document(db.Model):
     uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     uploader = db.relationship('User', back_populates='documents')
     audit_logs = db.relationship('AuditLog', back_populates='document', lazy=True, cascade='all, delete-orphan')
-
+    
     def to_dict(self):
         return {
             'id': self.id,
@@ -116,6 +125,7 @@ class Document(db.Model):
 
 class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
+    
     id = db.Column(db.Integer, primary_key=True)
     document_id = db.Column(db.Integer, db.ForeignKey('documents.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -124,10 +134,10 @@ class AuditLog(db.Model):
     ip_address = db.Column(db.String(50))
     user_agent = db.Column(db.String(500))
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-
+    
     document = db.relationship('Document', back_populates='audit_logs')
     user = db.relationship('User', back_populates='audit_logs')
-
+    
     def to_dict(self):
         return {
             'id': self.id,
