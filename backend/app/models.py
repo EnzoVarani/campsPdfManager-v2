@@ -4,16 +4,17 @@ Modelos do banco de dados (User, Document, AuditLog)
 
 from datetime import datetime
 from enum import Enum
-from flask_sqlalchemy import SQLAlchemy
-from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, create_refresh_token
 
-from app import db, bcrypt
+# ✅ IMPORTAR das extensions
+from app.extensions import db, bcrypt
+
 
 class UserRole(Enum):
     ADMIN = "admin"
     USER = "user"
     VIEWER = "viewer"
+
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -28,8 +29,8 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = db.Column(db.DateTime)
 
-    documents = db.relationship('Document', backref='created_by_user', lazy='dynamic')
-    audit_logs = db.relationship('AuditLog', backref='user_ref', lazy='dynamic')
+    documents = db.relationship('Document', back_populates='uploader', lazy='dynamic')
+    audit_logs = db.relationship('AuditLog', back_populates='user', lazy='dynamic')
 
     def set_password(self, password: str):
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
@@ -65,63 +66,53 @@ class User(db.Model):
 
 class Document(db.Model):
     __tablename__ = 'documents'
+    
     id = db.Column(db.Integer, primary_key=True)
-    identifier = db.Column(db.String(100), unique=True, nullable=False, index=True)
-
-    title = db.Column(db.String(500), nullable=False, default='')
-    subject = db.Column(db.Text)
-    author = db.Column(db.String(255), nullable=False, default='')
-    doc_type = db.Column(db.String(100), nullable=False, default='')
-    digitalization_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    digitalization_location = db.Column(db.String(255), nullable=False)
-    responsible = db.Column(db.String(255), nullable=False, default='')
-
+    filename = db.Column(db.String(255), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
-    original_path = db.Column(db.String(500))
-    processed_path = db.Column(db.String(500))
-
-    hash_sha256 = db.Column(db.String(64))
-    file_size = db.Column(db.Integer)
-
+    file_path = db.Column(db.String(500), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False)
+    file_hash = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    
+    # Metadados básicos
+    title = db.Column(db.String(255))
+    author = db.Column(db.String(255))
+    subject = db.Column(db.String(500))
+    doc_type = db.Column(db.String(100))
+    keywords = db.Column(db.String(500))
+    
+    # Status e assinatura
     is_signed = db.Column(db.Boolean, default=False)
-    signature_date = db.Column(db.DateTime)
-    signature_provider = db.Column(db.String(50))
-    signature_id = db.Column(db.String(255))
-    signature_url = db.Column(db.String(500))
-    signature_status = db.Column(db.String(50))
-
-    status = db.Column(db.String(50), default='uploaded')
-
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    signed_at = db.Column(db.DateTime)
+    
+    # Timestamps
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    audit_logs = db.relationship('AuditLog', backref='document', lazy='dynamic', cascade='all, delete-orphan')
+    
+    # Relacionamentos
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    uploader = db.relationship('User', back_populates='documents')
+    audit_logs = db.relationship('AuditLog', back_populates='document', lazy=True, cascade='all, delete-orphan')
 
     def to_dict(self):
         return {
             'id': self.id,
-            'identifier': self.identifier,
+            'filename': self.filename,
             'original_filename': self.original_filename,
             'file_size': self.file_size,
-            'hash_sha256': self.hash_sha256,
-            'title': self.title or None,
-            'author': self.author or None,
-            'subject': self.subject or None,
-            'doc_type': self.doc_type or None,
-            'responsible': self.responsible or None,
-            'status': self.status,
+            'file_hash': self.file_hash,
+            'title': self.title,
+            'author': self.author,
+            'subject': self.subject,
+            'doc_type': self.doc_type,
+            'keywords': self.keywords,
             'is_signed': self.is_signed,
-            'signature_status': self.signature_status,
-            'signature_provider': self.signature_provider,
-            'signature_date': self.signature_date.isoformat() if self.signature_date else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'created_by': self.created_by,  # ✅ Apenas o ID
-            'digitalization_date': self.digitalization_date.isoformat() if self.digitalization_date else None,
-            'digitalization_location': self.digitalization_location
+            'signed_at': self.signed_at.isoformat() if self.signed_at else None,
+            'uploaded_at': self.uploaded_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+            'uploaded_by': self.uploaded_by
         }
+
 
 class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
@@ -134,6 +125,9 @@ class AuditLog(db.Model):
     user_agent = db.Column(db.String(500))
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
+    document = db.relationship('Document', back_populates='audit_logs')
+    user = db.relationship('User', back_populates='audit_logs')
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -143,5 +137,5 @@ class AuditLog(db.Model):
             'ip_address': self.ip_address,
             'user_agent': self.user_agent,
             'document_id': self.document_id,
-            'user_id': self.user_id  # ✅ Apenas o ID (sem relationship)
+            'user_id': self.user_id
         }

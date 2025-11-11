@@ -1,155 +1,138 @@
 """
-Inicialização da aplicação Flask
+Factory da aplicação Flask
 """
 
-from flask import Flask
-from flask_cors import CORS
-from flask_jwt_extended import JWTManager
-from flask_bcrypt import Bcrypt
-from flask_sqlalchemy import SQLAlchemy
 import os
-from pathlib import Path
-from datetime import datetime
+from flask import Flask, jsonify
+from app.extensions import db, bcrypt, jwt, cors
+from app.config import config
 
-# Inicializar extensões
-db = SQLAlchemy()
-jwt = JWTManager()
-bcrypt = Bcrypt()
 
-def create_app(config_name=None):
-    """Factory para criar a aplicação"""
+def create_app(config_name='development'):
+    """Factory para criar a aplicação Flask"""
     
     app = Flask(__name__)
     
-    # Configurar ambiente
-    if config_name is None:
-        config_name = os.getenv('FLASK_ENV', 'development')
-    
-    from app.config import config
+    # Carregar configuração
     app.config.from_object(config[config_name])
-    
-    # Obter caminho base do projeto (pasta backend/)
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    STORAGE_DIR = BASE_DIR / 'storage'
-    
-    # Pastas de storage - USANDO CAMINHOS ABSOLUTOS
-    app.config['UPLOAD_FOLDER'] = str(STORAGE_DIR / 'temp')
-    app.config['ORIGINALS_FOLDER'] = str(STORAGE_DIR / 'originals')
-    app.config['PROCESSED_FOLDER'] = str(STORAGE_DIR / 'processed')
     
     # Inicializar extensões
     db.init_app(app)
-    jwt.init_app(app)
     bcrypt.init_app(app)
-    CORS(app, origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-        "*"  # Remover em produção
-    ])
+    jwt.init_app(app)
+    cors.init_app(app, resources={
+        r"/api/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"]
+        }
+    })
     
-    # Criar diretórios de storage
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['ORIGINALS_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['PROCESSED_FOLDER'], exist_ok=True)
+    # ✅ CORREÇÃO CRÍTICA: Importar modelos ANTES de create_all()
+    with app.app_context():
+        # Importar todos os modelos para que SQLAlchemy os registre
+        from app.models import User, Document, AuditLog
+        
+        try:
+            # Agora o create_all() conhece os modelos
+            db.create_all()
+            app.logger.info("✅ Tabelas do banco de dados criadas com sucesso")
+            
+            # Verificar se as tabelas foram criadas
+            inspector = db.inspect(db.engine)
+            tables = inspector.get_table_names()
+            app.logger.info(f"📋 Tabelas criadas: {', '.join(tables)}")
+            
+        except Exception as e:
+            app.logger.error(f"❌ Erro ao criar tabelas: {e}")
     
-    # Configurar JWT
-    @jwt.additional_claims_loader
-    def add_claims_to_access_token(identity):
-        from app.models import User
-        user = User.query.get(identity)
-        if user:
-            return {
-                'role': user.role.value,
-                'name': user.name
-            }
-        return {}
-    
-    @jwt.user_identity_loader
-    def user_identity_lookup(user):
-        return str(user)   # <- Sempre retorna string!
-    
-    @jwt.user_lookup_loader
-    def user_lookup_callback(_jwt_header, jwt_data):
-        from app.models import User
-        identity = jwt_data["sub"]
-        return User.query.filter_by(id=identity).one_or_none()
+    # Criar admin em contexto separado APÓS confirmar que tabelas existem
+    with app.app_context():
+        try:
+            create_default_admin()
+        except Exception as e:
+            app.logger.error(f"❌ Erro ao criar admin padrão: {e}")
     
     # Registrar blueprints
-    from app.routes.documents import documents_bp
-    from app.routes.analytics import analytics_bp
-    from app.auth import auth_bp
+    try:
+        from app.routes.documents import documents_bp
+        app.register_blueprint(documents_bp, url_prefix='/api/documents')
+        app.logger.info("✅ Rotas de documentos registradas")
+    except ImportError as e:
+        app.logger.warning(f"⚠️ Erro ao importar rotas de documentos: {e}")
     
-    app.register_blueprint(documents_bp, url_prefix='/api/documents')
-    app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
-    app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    try:
+        from app.routes.analytics import analytics_bp
+        app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
+        app.logger.info("✅ Rotas de analytics registradas")
+    except ImportError as e:
+        app.logger.warning(f"⚠️ Erro ao importar rotas de analytics: {e}")
+
+    try:
+        from app.routes.auth import auth_bp
+        app.register_blueprint(auth_bp, url_prefix='/api/auth')
+        app.logger.info("✅ Rotas de autenticação registradas")
+    except ImportError as e:
+        app.logger.warning(f"⚠️ Erro ao importar rotas de autenticação: {e}")
     
-    # Rotas de teste e saúde
+    
+    @app.route('/debug/routes')
+    def list_routes():
+        """Lista todas as rotas disponíveis (apenas para debug)"""
+        routes = []
+        for rule in app.url_map.iter_rules():
+            methods = ', '.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
+            routes.append({
+                'endpoint': rule.endpoint,
+                'methods': methods,
+                'path': rule.rule
+            })
+        return jsonify(sorted(routes, key=lambda x: x['path'])), 200
+    
+    # Rota de teste
     @app.route('/')
     def index():
         return {
             'message': 'CAMPS PDF Manager API v2.0',
-            'version': '2.0.0',
-            'company': app.config.get('COMPANY_NAME', 'CAMPS Santos'),
-            'status': 'running',
-            'features': [
-                'JWT Authentication',
-                'Role-based Authorization',
-                'Document Management',
-                'DocuSign Integration',
-                'Analytics Dashboard',
-                'Audit Logging'
-            ]
-        }
+            'status': 'online',
+            'endpoints': {
+                'documents': '/api/documents',
+                'analytics': '/api/analytics'
+            }
+        }, 200
     
     @app.route('/health')
     def health():
-        try:
-            # Testar conexão com o banco
-            db.session.execute('SELECT 1')
-            db_status = 'ok'
-        except Exception:
-            db_status = 'error'
-        
-        return {
-            'status': 'ok',
-            'database': db_status,
-            'timestamp': datetime.utcnow().isoformat()
-        }, 200
-    
-    # Inicializar banco e dados
-    with app.app_context():
-        db.create_all()
-        if app.config.get('CREATE_ADMIN_ON_STARTUP', True):
-            create_initial_data(app)
+        return {'status': 'healthy', 'database': 'connected'}, 200
     
     return app
 
-def create_initial_data(app):
-    """Criar dados iniciais (usuário admin)"""
+
+def create_default_admin():
+    """Cria usuário admin padrão se não existir"""
+    from app.models import User, UserRole
+    
     try:
-        from app.models import User, UserRole
+        admin_email = 'admin@camps.com'
         
-        # Verificar se já existe um admin
-        admin_user = User.query.filter_by(role=UserRole.ADMIN).first()
+        # Verificar se admin já existe
+        existing_admin = User.query.filter_by(email=admin_email).first()
         
-        if not admin_user:
-            # Criar usuário administrador inicial
+        if not existing_admin:
             admin = User(
-                name='Administrador CAMPS',
-                email=app.config.get('ADMIN_EMAIL', 'admin@camps.com'),
+                email=admin_email,
+                name='Administrador',
                 role=UserRole.ADMIN,
                 is_active=True
             )
-            admin.set_password(app.config.get('ADMIN_PASSWORD', 'admin123'))
-            
+            admin.set_password('admin123')
             db.session.add(admin)
             db.session.commit()
-            
-            app.logger.info(f"Usuário administrador criado: {admin.email}")
-            print(f"✅ Admin criado: {admin.email} | Senha: {app.config.get('ADMIN_PASSWORD', 'admin123')}")
+            print(f"✅ Admin padrão criado: {admin_email} / admin123")
+        else:
+            print(f"ℹ️ Admin já existe: {admin_email}")
             
     except Exception as e:
-        app.logger.error(f"Erro ao criar dados iniciais: {str(e)}")
         db.session.rollback()
+        print(f"❌ Erro ao criar admin: {e}")
+        raise

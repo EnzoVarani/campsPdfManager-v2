@@ -1,7 +1,9 @@
 """
 Rotas para gerenciamento de documentos com autenticação JWT
 """
-
+import uuid
+from app.services.batch_processor import batch_processor
+from app.services.metadata_validator import MetadataValidator
 from flask import Blueprint, request, jsonify, send_file, current_app
 from werkzeug.exceptions import RequestEntityTooLarge
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -497,6 +499,99 @@ def delete_many_documents():
             'success': False,
             'message': f'Erro ao deletar documentos: {str(e)}'
         }), 500
+
+@documents_bp.route('/batch/metadata', methods=['POST'])
+@jwt_required()
+@user_required
+def batch_add_metadata():
+    """
+    Adiciona metadados em lote para múltiplos documentos
+    Processa de forma assíncrona usando sistema de fila
+    """
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    
+    document_ids = data.get('document_ids', [])
+    metadata = data.get('metadata', {})
+    
+    # Validações
+    if not document_ids or not isinstance(document_ids, list):
+        return jsonify({
+            'success': False,
+            'message': 'Lista de IDs de documentos é obrigatória'
+        }), 400
+    
+    if len(document_ids) > 50:
+        return jsonify({
+            'success': False,
+            'message': 'Máximo de 50 documentos por lote'
+        }), 400
+    
+    if not metadata or not isinstance(metadata, dict):
+        return jsonify({
+            'success': False,
+            'message': 'Metadados são obrigatórios'
+        }), 400
+    
+    # Validar metadados
+    validator = MetadataValidator()
+    validation = validator.validate_metadata(metadata)
+    
+    if not validation['valid']:
+        return jsonify({
+            'success': False,
+            'message': 'Metadados inválidos',
+            'errors': validation['errors']
+        }), 400
+    
+    # Verificar se documentos existem
+    documents = Document.query.filter(Document.id.in_(document_ids)).all()
+    if len(documents) != len(document_ids):
+        return jsonify({
+            'success': False,
+            'message': 'Um ou mais documentos não foram encontrados'
+        }), 404
+    
+    # Gerar ID único para a tarefa
+    task_id = str(uuid.uuid4())
+    
+    # Submeter para processamento assíncrono
+    batch_processor.submit_task(
+        task_id=task_id,
+        document_ids=document_ids,
+        metadata=metadata,
+        user_id=current_user_id,
+        ip_address=request.remote_addr
+    )
+    
+    return jsonify({
+        'success': True,
+        'message': f'Processamento iniciado para {len(document_ids)} documentos',
+        'task_id': task_id,
+        'total_documents': len(document_ids)
+    }), 202
+
+
+@documents_bp.route('/batch/status/<task_id>', methods=['GET'])
+@jwt_required()
+def get_batch_status(task_id):
+    """Retorna o status de uma tarefa de processamento em lote"""
+    task_status = batch_processor.get_task_status(task_id)
+    
+    if not task_status:
+        return jsonify({
+            'success': False,
+            'message': 'Tarefa não encontrada'
+        }), 404
+    
+    return jsonify({
+        'success': True,
+        'task_id': task_id,
+        'status': task_status['status'],
+        'submitted_at': task_status['submitted_at'].isoformat(),
+        'updated_at': task_status.get('updated_at').isoformat() if task_status.get('updated_at') else None,
+        'result': task_status.get('result')
+    }), 200
 
 @documents_bp.route('/stats', methods=['GET'])
 @jwt_required()

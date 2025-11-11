@@ -50,6 +50,7 @@ class DevelopmentConfig(Config):
     """Configuração de desenvolvimento"""
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///camps_dev.db')
+    SQLALCHEMY_ECHO = True
     
 class ProductionConfig(Config):
     """Configuração de produção"""
@@ -58,6 +59,7 @@ class ProductionConfig(Config):
         'DATABASE_URL', 
         'postgresql://username:password@localhost/camps_prod'
     )
+    SQLALCHEMY_ECHO = False
     
 class TestingConfig(Config):
     """Configuração de testes"""

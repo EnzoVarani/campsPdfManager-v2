@@ -4,7 +4,8 @@ Testes de autenticação JWT
 
 import pytest
 import json
-from app import create_app, db
+from app import create_app
+from app.extensions import db
 from app.models import User, UserRole
 
 @pytest.fixture
