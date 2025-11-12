@@ -2,80 +2,93 @@
 Processador em Lote de Metadados
 Sistema de fila com threading para processar múltiplos arquivos
 """
-import os
+
 import threading
 import queue
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
-from flask import current_app
 from app.extensions import db
 from app.models import Document, AuditLog
 from app.services.metadata_validator import MetadataValidator
 
 logger = logging.getLogger(__name__)
 
+
 class BatchProcessor:
     """Processador de lote com sistema de fila e threading"""
     
-    def __init__(self, app=None, max_workers: int = 3):
-        self.app = app
+    def __init__(self, max_workers: int = 3):
         self.max_workers = max_workers
         self.task_queue = queue.Queue()
         self.active_tasks = {}
         self.workers = []
         self._lock = threading.Lock()
-        
-        if app is not None:
-            self.init_app(app)
+        self._workers_started = False
     
-    def init_app(self, app):
-        """Inicializa com a aplicação Flask"""
-        self.app = app
-        self._start_workers()
+    def ensure_workers_started(self, app):
+        """
+        Garante que os workers estão iniciados
+        ✅ CORREÇÃO: Inicia workers quando necessário
+        """
+        if not self._workers_started:
+            self._start_workers(app)
     
-    def _start_workers(self):
+    def _start_workers(self, app):
         """Inicia workers para processar tarefas"""
         for i in range(self.max_workers):
             worker = threading.Thread(
                 target=self._worker,
+                args=(app,),  # ✅ Passar app para o worker
                 name=f"BatchWorker-{i}",
                 daemon=True
             )
             worker.start()
             self.workers.append(worker)
             logger.info(f"✅ Worker {i} iniciado")
+            print(f"✅ Batch Worker {i} iniciado")
+        
+        self._workers_started = True
     
-    def _worker(self):
+    def _worker(self, app):
         """Worker que processa tarefas da fila"""
+        print(f"🔄 Worker {threading.current_thread().name} em execução...")
+        
         while True:
             try:
                 task = self.task_queue.get(timeout=1)
+                
                 if task is None:
                     break
                 
                 task_id = task['task_id']
                 logger.info(f"📋 Processando tarefa {task_id}")
+                print(f"📋 Processando tarefa {task_id}")
                 
                 try:
                     self._update_task_status(task_id, 'processing')
                     
-                    # Executar dentro do contexto Flask
-                    with self.app.app_context():
+                    # ✅ Executar dentro do contexto Flask
+                    with app.app_context():
                         result = self._process_task(task)
                     
                     self._update_task_result(task_id, result)
                     self._update_task_status(task_id, 'completed')
                     logger.info(f"✅ Tarefa {task_id} concluída")
+                    print(f"✅ Tarefa {task_id} concluída: {result['success']}/{result['total']} documentos")
                     
                 except Exception as e:
                     logger.error(f"❌ Erro na tarefa {task_id}: {str(e)}", exc_info=True)
+                    print(f"❌ Erro na tarefa {task_id}: {str(e)}")
+                    
                     self._update_task_result(task_id, {
                         'success': 0,
                         'failed': task.get('total', 0),
-                        'error': str(e)
+                        'error': str(e),
+                        'results': []
                     })
                     self._update_task_status(task_id, 'failed')
+                
                 finally:
                     self.task_queue.task_done()
                     
@@ -83,6 +96,7 @@ class BatchProcessor:
                 continue
             except Exception as e:
                 logger.error(f"❌ Erro crítico no worker: {str(e)}", exc_info=True)
+                print(f"❌ Erro crítico no worker: {str(e)}")
     
     def _process_task(self, task: Dict) -> Dict:
         """Processa uma tarefa individual"""
@@ -98,6 +112,7 @@ class BatchProcessor:
             try:
                 # Buscar documento
                 document = Document.query.get(doc_id)
+                
                 if not document:
                     results.append({
                         'document_id': doc_id,
@@ -106,8 +121,9 @@ class BatchProcessor:
                     })
                     continue
                 
-                # Validar metadados
-                validation = validator.validate_metadata(metadata, document)
+                # ✅ CORREÇÃO: Validar apenas metadados (sem document)
+                validation = validator.validate_metadata(metadata)
+                
                 if not validation['valid']:
                     results.append({
                         'document_id': doc_id,
@@ -117,7 +133,7 @@ class BatchProcessor:
                     })
                     continue
                 
-                # Guardar metadados antigos
+                # Guardar metadados antigos para log
                 old_metadata = {
                     'title': document.title,
                     'author': document.author,
@@ -126,25 +142,43 @@ class BatchProcessor:
                     'doc_type': document.doc_type
                 }
                 
-                # Atualizar documento
-                document.title = metadata.get('title', document.title)
-                document.author = metadata.get('author', document.author)
-                document.subject = metadata.get('subject', document.subject)
-                document.keywords = metadata.get('keywords', document.keywords)
-                document.doc_type = metadata.get('doc_type', document.doc_type)
+                # ✅ CORREÇÃO: Atualizar documento corretamente
+                if 'title' in metadata and metadata['title']:
+                    document.title = metadata['title']
+                
+                if 'author' in metadata and metadata['author']:
+                    document.author = metadata['author']
+                
+                if 'subject' in metadata and metadata['subject']:
+                    document.subject = metadata['subject']
+                
+                if 'keywords' in metadata and metadata['keywords']:
+                    document.keywords = metadata['keywords']
+                
+                if 'doc_type' in metadata and metadata['doc_type']:
+                    # ✅ Normalizar para minúsculo
+                    document.doc_type = metadata['doc_type'].lower()
+                
                 document.updated_at = datetime.utcnow()
-                document.status = 'metadata_added'
+                
+                # ✅ CORREÇÃO: Remover campo 'status' que não existe
+                # document.status = 'metadata_added'  # REMOVIDO
                 
                 db.session.flush()
                 
-                # Log de auditoria
+                # ✅ CORREÇÃO: Log de auditoria SEM metadata_changes
+                changes = []
+                for key in ['title', 'author', 'subject', 'doc_type', 'keywords']:
+                    if key in metadata and metadata[key]:
+                        changes.append(f"{key}: '{metadata[key]}'")
+                
                 audit = AuditLog(
                     document_id=document.id,
                     user_id=user_id,
                     action='metadata_batch_update',
-                    description=f'Metadados aplicados em lote: "{document.title}"',
+                    description=f'Metadados atualizados em lote: {", ".join(changes)}',
                     ip_address=ip_address,
-                    metadata_changes=f"Antes: {old_metadata} | Depois: {metadata}"
+                    user_agent=None
                 )
                 db.session.add(audit)
                 db.session.commit()
@@ -156,10 +190,13 @@ class BatchProcessor:
                 })
                 
                 logger.info(f"✅ Documento {doc_id} processado")
+                print(f"  ✅ Documento {doc_id} atualizado: {document.title}")
                 
             except Exception as e:
                 logger.error(f"❌ Erro no documento {doc_id}: {str(e)}")
+                print(f"  ❌ Erro no documento {doc_id}: {str(e)}")
                 db.session.rollback()
+                
                 results.append({
                     'document_id': doc_id,
                     'success': False,
@@ -175,9 +212,14 @@ class BatchProcessor:
             'results': results
         }
     
-    def submit_task(self, task_id: str, document_ids: List[int], 
+    def submit_task(self, task_id: str, document_ids: List[int],
                     metadata: Dict, user_id: int, ip_address: str) -> str:
         """Adiciona tarefa à fila"""
+        # ✅ CORREÇÃO: Iniciar workers se não foram iniciados
+        from flask import current_app
+        if not self._workers_started:
+            self.ensure_workers_started(current_app._get_current_object())
+        
         task = {
             'task_id': task_id,
             'document_ids': document_ids,
@@ -192,11 +234,14 @@ class BatchProcessor:
             self.active_tasks[task_id] = {
                 'status': 'queued',
                 'submitted_at': task['submitted_at'],
+                'updated_at': None,
                 'result': None
             }
         
         self.task_queue.put(task)
         logger.info(f"📝 Tarefa {task_id} adicionada ({len(document_ids)} docs)")
+        print(f"📝 Tarefa {task_id} adicionada à fila ({len(document_ids)} documentos)")
+        
         return task_id
     
     def get_task_status(self, task_id: str) -> Optional[Dict]:
@@ -217,5 +262,6 @@ class BatchProcessor:
             if task_id in self.active_tasks:
                 self.active_tasks[task_id]['result'] = result
 
-# Instância global
+
+# ✅ Instância global
 batch_processor = BatchProcessor(max_workers=3)
