@@ -1,5 +1,6 @@
 /**
  * Sistema de Autenticação JWT para CAMPS PDF Manager
+ * Integrado com Flask Backend
  */
 
 class AuthManager {
@@ -15,28 +16,40 @@ class AuthManager {
             const response = await fetch(`${this.baseURL}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email.toLowerCase().trim(), password })
+                body: JSON.stringify({ 
+                    email: email.toLowerCase().trim(), 
+                    password 
+                })
             });
 
             const data = await response.json();
 
-            if (data.success) {
-                this.token = data.data.tokens.access_token;
-                this.refreshToken = data.data.tokens.refresh_token;
-                this.user = data.data.user;
+            // ✅ CORREÇÃO: Backend retorna tokens na raiz, não em data.data.tokens
+            if (response.ok) {
+                this.token = data.access_token;  // ✅ Direto da raiz
+                this.refreshToken = data.refresh_token;  // ✅ Direto da raiz
+                this.user = data.user;  // ✅ Direto da raiz
 
+                // Salvar no localStorage
                 localStorage.setItem('access_token', this.token);
                 localStorage.setItem('refresh_token', this.refreshToken);
                 localStorage.setItem('user', JSON.stringify(this.user));
 
-                console.log('Login successful:', this.user.name);
+                console.log('✅ Login successful:', this.user.name);
                 return { success: true, user: this.user };
             } else {
-                return { success: false, message: data.message };
+                return { 
+                    success: false, 
+                    message: data.error || 'Falha no login' 
+                };
             }
+
         } catch (error) {
-            console.error('Login error:', error);
-            return { success: false, message: 'Erro de conexão com o servidor' };
+            console.error('❌ Login error:', error);
+            return { 
+                success: false, 
+                message: 'Erro de conexão com o servidor' 
+            };
         }
     }
 
@@ -57,16 +70,20 @@ class AuthManager {
 
             const data = await response.json();
 
-            if (data.success) {
-                this.token = data.data.access_token;
+            // ✅ CORREÇÃO: Backend retorna access_token na raiz
+            if (response.ok) {
+                this.token = data.access_token;  // ✅ Direto da raiz
                 localStorage.setItem('access_token', this.token);
+                console.log('✅ Token renovado com sucesso');
                 return true;
             } else {
+                console.log('❌ Falha ao renovar token');
                 this.logout();
                 return false;
             }
+
         } catch (error) {
-            console.error('Token refresh error:', error);
+            console.error('❌ Token refresh error:', error);
             this.logout();
             return false;
         }
@@ -88,14 +105,17 @@ class AuthManager {
 
         let response = await fetch(url, requestOptions);
 
-        // Se token expirou, tentar renovar
+        // Se token expirou (401), tentar renovar
         if (response.status === 401) {
+            console.log('⚠️ Token expirado, tentando renovar...');
             const refreshed = await this.refreshAccessToken();
+            
             if (refreshed) {
+                // Tentar novamente com novo token
                 requestOptions.headers['Authorization'] = `Bearer ${this.token}`;
                 response = await fetch(url, requestOptions);
             } else {
-                throw new Error('Sessão expirada');
+                throw new Error('Sessão expirada. Faça login novamente.');
             }
         }
 
@@ -111,7 +131,7 @@ class AuthManager {
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('user');
         
-        console.log('Logout completed');
+        console.log('👋 Logout completed');
         window.location.reload();
     }
 
@@ -145,39 +165,68 @@ class AuthManager {
     getUserInfo() {
         return this.user;
     }
+
+    // ✅ NOVO: Método para verificar se usuário é admin
+    isAdmin() {
+        return this.hasRole('admin');
+    }
+
+    // ✅ NOVO: Método para pegar apenas o token
+    getToken() {
+        return this.token;
+    }
 }
 
 // Instância global do AuthManager
 const auth = new AuthManager();
 
-// Configurar interceptador para requests automáticos
-const originalFetch = window.fetch;
+// ✅ Configurar interceptador para requests automáticos
 window.fetchAuth = async (url, options = {}) => {
     return auth.fetchWithAuth(url, options);
 };
 
-// Funções utilitárias
+// ========== FUNÇÕES UTILITÁRIAS ==========
+
 function showToast(message, type = 'info') {
+    // Criar container se não existir
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:10000;';
+        document.body.appendChild(container);
+    }
+
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.innerHTML = `
-        <i class="fas fa-${type === 'error' ? 'exclamation-triangle' : type === 'success' ? 'check-circle' : 'info-circle'}"></i>
-        ${message}
+    toast.style.cssText = `
+        padding: 15px 20px;
+        margin-bottom: 10px;
+        border-radius: 8px;
+        background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
+        color: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        opacity: 0;
+        transition: opacity 0.3s;
     `;
-    
-    document.getElementById('toastContainer').appendChild(toast);
-    
+    toast.textContent = message;
+
+    container.appendChild(toast);
+
+    // Animação de entrada
     setTimeout(() => {
-        toast.classList.add('show');
+        toast.style.opacity = '1';
     }, 100);
-    
+
+    // Remover após 3 segundos
     setTimeout(() => {
-        toast.classList.remove('show');
+        toast.style.opacity = '0';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
 
-// Event listeners
+// ========== INICIALIZAÇÃO ==========
+
 document.addEventListener('DOMContentLoaded', function() {
     const loginForm = document.getElementById('loginForm');
     const logoutBtn = document.getElementById('logoutBtn');
@@ -186,25 +235,32 @@ document.addEventListener('DOMContentLoaded', function() {
     if (loginForm) {
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const email = document.getElementById('loginEmail').value;
             const password = document.getElementById('loginPassword').value;
             const errorDiv = document.getElementById('loginError');
-            
+            const submitBtn = loginForm.querySelector('button[type="submit"]');
+
             if (!email || !password) {
                 errorDiv.textContent = 'Email e senha são obrigatórios';
                 return;
             }
-            
+
+            // Desabilitar botão durante login
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Entrando...';
             errorDiv.textContent = '';
-            
+
             const result = await auth.login(email, password);
+
             if (result.success) {
                 document.getElementById('loginModal').style.display = 'none';
                 initializeApp();
                 showToast(`Bem-vindo, ${result.user.name}!`, 'success');
             } else {
                 errorDiv.textContent = result.message;
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Entrar';
             }
         });
     }
@@ -227,31 +283,53 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function showLoginModal() {
-    document.getElementById('loadingScreen').style.display = 'none';
-    document.getElementById('loginModal').style.display = 'flex';
-    document.getElementById('appContainer').style.display = 'none';
+    const loadingScreen = document.getElementById('loadingScreen');
+    const loginModal = document.getElementById('loginModal');
+    const appContainer = document.getElementById('appContainer');
+
+    if (loadingScreen) loadingScreen.style.display = 'none';
+    if (loginModal) loginModal.style.display = 'flex';
+    if (appContainer) appContainer.style.display = 'none';
 }
 
 function initializeApp() {
-    document.getElementById('loadingScreen').style.display = 'none';
-    document.getElementById('loginModal').style.display = 'none';
-    document.getElementById('appContainer').style.display = 'block';
-    
+    const loadingScreen = document.getElementById('loadingScreen');
+    const loginModal = document.getElementById('loginModal');
+    const appContainer = document.getElementById('appContainer');
+
+    if (loadingScreen) loadingScreen.style.display = 'none';
+    if (loginModal) loginModal.style.display = 'none';
+    if (appContainer) appContainer.style.display = 'block';
+
     updateUserInfo();
-    loadDashboard();
+    
+    // Carregar dashboard se a função existir
+    if (typeof loadDashboard === 'function') {
+        loadDashboard();
+    }
 }
 
 function updateUserInfo() {
     const user = auth.getUserInfo();
-    if (user) {
-        document.getElementById('userInfo').innerHTML = `
-            <i class="fas fa-user-circle"></i> ${user.name} 
-            <span class="role-badge role-${user.role}">${user.role.toUpperCase()}</span>
+    const userInfoDiv = document.getElementById('userInfo');
+
+    if (user && userInfoDiv) {
+        userInfoDiv.innerHTML = `
+            <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
+            <div class="user-details">
+                <div class="user-name">${user.name}</div>
+                <div class="user-role">${user.role.toUpperCase()}</div>
+            </div>
         `;
-        
+
         // Mostrar menu de usuários apenas para admins
-        if (auth.hasRole('admin')) {
-            document.getElementById('usersNav').style.display = 'block';
+        const usersNav = document.getElementById('usersNav');
+        if (usersNav) {
+            usersNav.style.display = auth.hasRole('admin') ? 'block' : 'none';
         }
     }
 }
+
+// ✅ Exportar auth para ser usado em outros scripts
+window.auth = auth;
+window.showToast = showToast;

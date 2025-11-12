@@ -1,23 +1,43 @@
 /**
  * CAMPS PDF Manager v2.0 - Main Application Logic
- * VERSÃO CORRIGIDA - Timezone Brasília
+ * INTEGRADO COM FLASK BACKEND
  */
 
 const API_BASE = 'http://localhost:5000/api';
+
+// Estado global
 let currentPage = 1;
 let documentsData = [];
 let chartsInstances = {};
-let selectedDocumentIds = new Set();
+let selectedDocuments = new Set(); // IDs dos documentos selecionados
+let selectedFiles = []; // Arquivos para upload
+
+
+// =============================================================================
+// INICIALIZAÇÃO
+// =============================================================================
+
+document.addEventListener('DOMContentLoaded', function () {
+    // Verificar autenticação
+    if (!auth.isAuthenticated()) {
+        showLoginModal();
+        return;
+    }
+
+    setupNavigation();
+    setupModals();
+    setupUploadSystem();
+    setupBatchActions();
+    updateUserInfo();
+    
+    // Carregar dashboard inicial
+    loadDashboard();
+});
+
 
 // =============================================================================
 // NAVIGATION
 // =============================================================================
-
-document.addEventListener('DOMContentLoaded', function () {
-    setupNavigation();
-    setupModals();
-    setupUploadSystem();
-});
 
 function setupNavigation() {
     const navButtons = document.querySelectorAll('.nav-btn');
@@ -33,7 +53,10 @@ function setupNavigation() {
 
             // Update sections
             sections.forEach(s => s.classList.remove('active'));
-            document.getElementById(`${targetSection}Section`).classList.add('active');
+            const section = document.getElementById(`${targetSection}Section`);
+            if (section) {
+                section.classList.add('active');
+            }
 
             // Load section data
             switch (targetSection) {
@@ -44,7 +67,7 @@ function setupNavigation() {
                     loadDocuments();
                     break;
                 case 'users':
-                    if (auth.hasRole('admin')) {
+                    if (auth.isAdmin()) {
                         loadUsers();
                     }
                     break;
@@ -53,152 +76,114 @@ function setupNavigation() {
     });
 }
 
+
 // =============================================================================
 // DASHBOARD
 // =============================================================================
 
 async function loadDashboard() {
     try {
-        const response = await auth.fetchWithAuth(`${API_BASE}/analytics/dashboard/summary`);
-        const data = await response.json();
+        // Carregar estatísticas
+        const statsResponse = await auth.fetchWithAuth(`${API_BASE}/documents/stats`);
+        const statsData = await statsResponse.json();
 
-        if (data.success) {
-            updateDashboardStats(data.data);
-            loadCharts();
-            updateRecentDocuments(data.data.recent_documents);
-        } else {
-            showToast('Erro ao carregar dashboard', 'error');
+        if (statsData.success) {
+            updateDashboardStats(statsData.data);
         }
+
+        // Carregar documentos recentes
+        const docsResponse = await auth.fetchWithAuth(`${API_BASE}/documents/?per_page=5`);
+        const docsData = await docsResponse.json();
+
+        if (docsData.success) {
+            updateRecentDocuments(docsData.data.documents);
+        }
+
+        // Carregar gráficos
+        loadCharts();
+
     } catch (error) {
         console.error('Dashboard error:', error);
-        showToast('Erro de conexão', 'error');
+        showToast('Erro ao carregar dashboard', 'error');
     }
 }
 
-function updateDashboardStats(data) {
-    const stats = data.totals;
-
-    const statsHTML = `
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-file-pdf"></i></div>
-            <div class="stat-content">
-                <h3>Total de Documentos</h3>
-                <p class="stat-number">${stats.documents || 0}</p>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-signature"></i></div>
-            <div class="stat-content">
-                <h3>Documentos Assinados</h3>
-                <p class="stat-number">${stats.signed_documents || 0}</p>
-                <small>${data.signing_rate || 0}% do total</small>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-calendar-day"></i></div>
-            <div class="stat-content">
-                <h3>Hoje</h3>
-                <p class="stat-number">${stats.documents_today || 0}</p>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-calendar-week"></i></div>
-            <div class="stat-content">
-                <h3>Esta Semana</h3>
-                <p class="stat-number">${stats.documents_week || 0}</p>
-            </div>
-        </div>
-        ${auth.hasRole('admin') && stats.active_users !== null ? `
-            <div class="stat-card">
-                <div class="stat-icon"><i class="fas fa-users"></i></div>
-                <div class="stat-content">
-                    <h3>Usuários Ativos</h3>
-                    <p class="stat-number">${stats.active_users}/${stats.total_users}</p>
-                </div>
-            </div>
-        ` : ''}
-    `;
-
-    document.getElementById('dashboardStats').innerHTML = statsHTML;
+function updateDashboardStats(stats) {
+    // Atualizar cards de estatísticas
+    document.getElementById('totalDocs').textContent = stats.total_documents || 0;
+    document.getElementById('signedDocs').textContent = stats.signed_documents || 0;
+    document.getElementById('todayDocs').textContent = stats.documents_today || 0;
+    
+    // Taxa de assinatura
+    const signingRate = document.getElementById('signingRate');
+    if (signingRate) {
+        signingRate.textContent = stats.signing_rate || '0%';
+    }
 }
 
 function updateRecentDocuments(documents) {
+    const container = document.getElementById('recentDocuments');
+    
     if (!documents || documents.length === 0) {
-        document.getElementById('recentDocuments').innerHTML = '<p>Nenhum documento encontrado</p>';
+        container.innerHTML = '<p class="no-data">Nenhum documento recente</p>';
         return;
     }
 
     const docsHTML = documents.map(doc => `
-        <div class="doc-item" onclick="showDocumentDetails(${doc.id})">
-            <div class="doc-icon">
-                <i class="fas fa-file-pdf"></i>
-            </div>
+        <div class="recent-doc-item">
+            <div class="doc-icon">📄</div>
             <div class="doc-info">
-                <h4>${doc.title || 'Sem título'}</h4>
-                <p>ID: ${doc.identifier}</p>
-                <small>Status: ${doc.status} | ${formatDate(doc.created_at)}</small>
+                <strong>${doc.title || doc.original_filename}</strong>
+                <small>${doc.author || 'Sem autor'} • ${formatDate(doc.uploaded_at)}</small>
             </div>
+            <span class="doc-badge ${doc.is_signed ? 'signed' : 'unsigned'}">
+                ${doc.is_signed ? '✓ Assinado' : '⋯ Pendente'}
+            </span>
         </div>
     `).join('');
 
-    document.getElementById('recentDocuments').innerHTML = docsHTML;
+    container.innerHTML = docsHTML;
 }
 
-// =============================================================================
-// CHARTS
-// =============================================================================
-
 async function loadCharts() {
-    try {
-        await Promise.all([
-            loadTimelineChart(),
-            loadTypeChart(),
-            loadSignatureChart()
-        ]);
-    } catch (error) {
-        console.error('Charts error:', error);
-    }
+    await loadTimelineChart();
+    await loadTypeChart();
+    await loadSignatureChart();
 }
 
 async function loadTimelineChart() {
     try {
-        const response = await auth.fetchWithAuth(`${API_BASE}/analytics/charts/documents-timeline?days=30`);
+        const response = await auth.fetchWithAuth(`${API_BASE}/analytics/charts/documents-timeline`);
         const data = await response.json();
 
-        if (data.success) {
-            const ctx = document.getElementById('timelineChart').getContext('2d');
+        if (data.success && data.data.basic.length > 0) {
+            const ctx = document.getElementById('timelineChart');
+            if (!ctx) return;
 
             if (chartsInstances.timeline) {
                 chartsInstances.timeline.destroy();
             }
 
-            chartsInstances.timeline = new Chart(ctx, {
+            chartsInstances.timeline = new Chart(ctx.getContext('2d'), {
                 type: 'line',
                 data: {
-                    labels: data.data.timeline.map(item => formatDate(item.date, 'short')),
+                    labels: data.data.basic.map(item => item.date),
                     datasets: [{
-                        label: 'Documentos por Dia',
-                        data: data.data.timeline.map(item => item.count),
-                        borderColor: 'rgb(75, 192, 192)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        tension: 0.1,
+                        label: 'Documentos',
+                        data: data.data.basic.map(item => item.count),
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        tension: 0.4,
                         fill: true
                     }]
                 },
                 options: {
                     responsive: true,
                     plugins: {
-                        legend: {
-                            display: false
-                        }
+                        legend: { display: false }
                     },
                     scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1
-                            }
-                        }
+                        y: { beginAtZero: true }
                     }
                 }
             });
@@ -213,39 +198,33 @@ async function loadTypeChart() {
         const response = await auth.fetchWithAuth(`${API_BASE}/analytics/charts/documents-by-type`);
         const data = await response.json();
 
-        if (data.success && data.data.length > 0) {
-            const ctx = document.getElementById('typeChart').getContext('2d');
+        if (data.success && data.data.basic.length > 0) {
+            const ctx = document.getElementById('typeChart');
+            if (!ctx) return;
 
             if (chartsInstances.type) {
                 chartsInstances.type.destroy();
             }
 
-            const colors = [
-                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
-                '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
-            ];
-
-            chartsInstances.type = new Chart(ctx, {
+            chartsInstances.type = new Chart(ctx.getContext('2d'), {
                 type: 'doughnut',
                 data: {
-                    labels: data.data.map(item => item.type || 'Sem Tipo'),
+                    labels: data.data.basic.map(item => item.type || 'Sem tipo'),
                     datasets: [{
-                        data: data.data.map(item => item.count),
-                        backgroundColor: colors.slice(0, data.data.length),
-                        hoverOffset: 4
+                        data: data.data.basic.map(item => item.count),
+                        backgroundColor: [
+                            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
+                            '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
+                        ]
                     }]
                 },
                 options: {
                     responsive: true,
                     plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
+                        legend: { position: 'right' }
                     }
                 }
             });
-        } else {
-            document.getElementById('typeChart').parentElement.innerHTML = '<p>Nenhum dado disponível</p>';
         }
     } catch (error) {
         console.error('Type chart error:', error);
@@ -258,28 +237,26 @@ async function loadSignatureChart() {
         const data = await response.json();
 
         if (data.success) {
-            const ctx = document.getElementById('signatureChart').getContext('2d');
+            const ctx = document.getElementById('signatureChart');
+            if (!ctx) return;
 
             if (chartsInstances.signature) {
                 chartsInstances.signature.destroy();
             }
 
-            chartsInstances.signature = new Chart(ctx, {
+            chartsInstances.signature = new Chart(ctx.getContext('2d'), {
                 type: 'pie',
                 data: {
                     labels: data.data.basic.map(item => item.status),
                     datasets: [{
                         data: data.data.basic.map(item => item.count),
-                        backgroundColor: ['#28a745', '#dc3545'],
-                        hoverOffset: 4
+                        backgroundColor: ['#28a745', '#dc3545']
                     }]
                 },
                 options: {
                     responsive: true,
                     plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
+                        legend: { position: 'bottom' }
                     }
                 }
             });
@@ -288,6 +265,7 @@ async function loadSignatureChart() {
         console.error('Signature chart error:', error);
     }
 }
+
 
 // =============================================================================
 // UPLOAD SYSTEM
@@ -299,7 +277,7 @@ function setupUploadSystem() {
     const uploadBtn = document.getElementById('uploadBtn');
     const clearBtn = document.getElementById('clearBtn');
 
-    let selectedFiles = [];
+    if (!dropZone || !fileInput || !uploadBtn) return;
 
     // Drag & Drop
     dropZone.addEventListener('dragover', (e) => {
@@ -314,7 +292,6 @@ function setupUploadSystem() {
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
-
         const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
         addFilesToList(files);
     });
@@ -331,131 +308,126 @@ function setupUploadSystem() {
             showToast('Selecione pelo menos um arquivo', 'error');
             return;
         }
-
-        await uploadFiles(selectedFiles);
+        await uploadFiles();
     });
 
     // Clear button
-    clearBtn.addEventListener('click', () => {
-        selectedFiles = [];
-        updateFileList();
-        uploadBtn.disabled = true;
-    });
-
-    function addFilesToList(files) {
-        files.forEach(file => {
-            if (file.type === 'application/pdf' && !selectedFiles.find(f => f.name === file.name)) {
-                selectedFiles.push(file);
-            }
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            selectedFiles = [];
+            updateFileList();
+            uploadBtn.disabled = true;
         });
-        updateFileList();
-        uploadBtn.disabled = selectedFiles.length === 0;
     }
-
-    function updateFileList() {
-        const fileList = document.getElementById('fileList');
-
-        if (selectedFiles.length === 0) {
-            fileList.innerHTML = '';
-            return;
-        }
-
-        const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-
-        const filesHTML = selectedFiles.map((file, index) => {
-            const isTooBig = file.size > MAX_FILE_SIZE;
-            const sizeClass = isTooBig ? 'file-size-error' : 'file-size';
-
-            return `
-                <div class="file-item ${isTooBig ? 'file-item-error' : ''}">
-                    <div class="file-info">
-                        <i class="fas fa-file-pdf"></i>
-                        <span class="file-name">${file.name}</span>
-                        <span class="${sizeClass}">
-                            ${formatFileSize(file.size)}
-                            ${isTooBig ? ' <i class="fas fa-exclamation-triangle"></i> Muito grande!' : ''}
-                        </span>
-                    </div>
-                    <button class="btn-remove" onclick="removeFile(${index})">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-            `;
-        }).join('');
-
-        const hasInvalidFiles = selectedFiles.some(f => f.size > MAX_FILE_SIZE);
-
-        fileList.innerHTML = `
-            <h4>Arquivos Selecionados (${selectedFiles.length})</h4>
-            ${hasInvalidFiles ? '<p class="warning-text"><i class="fas fa-exclamation-triangle"></i> Alguns arquivos excedem 50MB e não serão enviados</p>' : ''}
-            ${filesHTML}
-        `;
-    }
-
-    window.removeFile = (index) => {
-        selectedFiles.splice(index, 1);
-        updateFileList();
-        uploadBtn.disabled = selectedFiles.length === 0;
-    };
 }
 
-async function uploadFiles(files) {
+function addFilesToList(files) {
+    files.forEach(file => {
+        if (file.type === 'application/pdf' && !selectedFiles.find(f => f.name === file.name)) {
+            selectedFiles.push(file);
+        }
+    });
+    updateFileList();
+    
+    const uploadBtn = document.getElementById('uploadBtn');
+    if (uploadBtn) {
+        uploadBtn.disabled = selectedFiles.length === 0;
+    }
+}
+
+function updateFileList() {
+    const fileList = document.getElementById('fileList');
+    if (!fileList) return;
+
+    if (selectedFiles.length === 0) {
+        fileList.innerHTML = '<p class="empty-state">Nenhum arquivo selecionado</p>';
+        return;
+    }
+
+    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+    const filesHTML = selectedFiles.map((file, index) => {
+        const isTooBig = file.size > MAX_FILE_SIZE;
+        const sizeClass = isTooBig ? 'text-danger' : '';
+        
+        return `
+            <div class="file-item ${isTooBig ? 'file-error' : ''}">
+                <div class="file-icon">📄</div>
+                <div class="file-info">
+                    <strong>${file.name}</strong>
+                    <small class="${sizeClass}">
+                        ${formatFileSize(file.size)} 
+                        ${isTooBig ? '⚠️ Muito grande (máx 50MB)' : ''}
+                    </small>
+                </div>
+                <button class="btn-icon" onclick="removeFile(${index})" title="Remover">
+                    🗑️
+                </button>
+            </div>
+        `;
+    }).join('');
+
+    const warningHTML = selectedFiles.some(f => f.size > MAX_FILE_SIZE) 
+        ? '<p class="warning">⚠️ Alguns arquivos excedem 50MB e não serão enviados</p>' 
+        : '';
+
+    fileList.innerHTML = warningHTML + filesHTML;
+}
+
+window.removeFile = (index) => {
+    selectedFiles.splice(index, 1);
+    updateFileList();
+    
+    const uploadBtn = document.getElementById('uploadBtn');
+    if (uploadBtn) {
+        uploadBtn.disabled = selectedFiles.length === 0;
+    }
+};
+
+async function uploadFiles() {
     const uploadBtn = document.getElementById('uploadBtn');
     const resultsDiv = document.getElementById('uploadResults');
 
-    // ✅ NOVO: Validar tamanho máximo (50MB)
-    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB em bytes
-    const invalidFiles = [];
-
-    files.forEach(file => {
-        if (file.size > MAX_FILE_SIZE) {
-            invalidFiles.push({
-                name: file.name,
-                size: formatFileSize(file.size)
-            });
-        }
-    });
-
-    // Se houver arquivos inválidos, mostrar erro
-    if (invalidFiles.length > 0) {
-        const errorMsg = invalidFiles.map(f =>
-            `${f.name} (${f.size})`
-        ).join(', ');
-
-        showToast(
-            `Arquivos muito grandes (máx 50MB): ${errorMsg}`,
-            'error'
-        );
+    // Validar tamanho máximo
+    const MAX_FILE_SIZE = 50 * 1024 * 1024;
+    const validFiles = selectedFiles.filter(f => f.size <= MAX_FILE_SIZE);
+    
+    if (validFiles.length === 0) {
+        showToast('Todos os arquivos excedem o tamanho máximo', 'error');
         return;
     }
 
     uploadBtn.disabled = true;
-    uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando...';
+    uploadBtn.innerHTML = '<span class="spinner"></span> Enviando...';
 
     try {
         const formData = new FormData();
-        files.forEach(file => {
+        validFiles.forEach(file => {
             formData.append('files[]', file);
         });
 
         const response = await fetch(`${API_BASE}/documents/upload`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${auth.token}`
+                'Authorization': `Bearer ${auth.getToken()}`
             },
             body: formData
         });
 
         const data = await response.json();
 
+        // ✅ CORREÇÃO: Backend retorna { success, message, data }
         if (data.success) {
             showUploadResults(data.data);
             showToast(data.message, 'success');
-
+            
+            // Limpar arquivos selecionados
             selectedFiles = [];
             updateFileList();
-
-            if (document.getElementById('dashboardSection').classList.contains('active')) {
+            
+            // Recarregar dashboard se estiver ativo
+            const dashboardSection = document.getElementById('dashboardSection');
+            if (dashboardSection && dashboardSection.classList.contains('active')) {
                 loadDashboard();
             }
         } else {
@@ -467,36 +439,34 @@ async function uploadFiles(files) {
         showToast('Erro ao enviar arquivos', 'error');
     } finally {
         uploadBtn.disabled = false;
-        uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Enviar PDFs';
+        uploadBtn.innerHTML = '📤 Enviar PDFs';
     }
 }
 
 function showUploadResults(results) {
     const resultsDiv = document.getElementById('uploadResults');
+    if (!resultsDiv) return;
 
     const successCount = results.filter(r => r.success).length;
     const totalCount = results.length;
 
     let resultsHTML = `
-        <div class="results-summary ${successCount === totalCount ? 'success' : 'warning'}">
-            <h3>
-                <i class="fas fa-${successCount === totalCount ? 'check-circle' : 'exclamation-triangle'}"></i>
-                Resultado: ${successCount}/${totalCount} arquivos processados
-            </h3>
+        <div class="results-summary ${successCount === totalCount ? 'success' : 'partial'}">
+            <strong>✅ ${successCount} de ${totalCount} arquivos enviados com sucesso!</strong>
         </div>
-        <div class="results-details">
+        <div class="results-list">
     `;
 
     results.forEach(result => {
         resultsHTML += `
             <div class="result-item ${result.success ? 'success' : 'error'}">
-                <i class="fas fa-${result.success ? 'check-circle' : 'exclamation-circle'}"></i>
+                <span class="result-icon">${result.success ? '✓' : '✗'}</span>
                 <div class="result-info">
                     <strong>${result.filename}</strong>
-                    ${result.success ?
-                `<p>ID: ${result.identifier} | Hash: ${result.hash?.substring(0, 8)}... | ${formatFileSize(result.size)}</p>` :
-                `<p class="error">${result.error}</p>`
-            }
+                    ${result.success 
+                        ? `<small>ID: ${result.document_id} | ${formatFileSize(result.size)} | ${result.pages} páginas</small>` 
+                        : `<small class="error-text">${result.error}</small>`
+                    }
                 </div>
             </div>
         `;
@@ -504,346 +474,463 @@ function showUploadResults(results) {
 
     resultsHTML += '</div>';
     resultsDiv.innerHTML = resultsHTML;
+    resultsDiv.style.display = 'block';
+
+    // Auto-hide após 5 segundos
+    setTimeout(() => {
+        resultsDiv.style.display = 'none';
+    }, 5000);
 }
 
+
 // =============================================================================
-// DOCUMENTS MANAGEMENT
+// DOCUMENTS LIST
 // =============================================================================
 
 async function loadDocuments(page = 1) {
     try {
         const search = document.getElementById('searchInput')?.value || '';
-        const status = document.getElementById('statusFilter')?.value || '';
         const docType = document.getElementById('typeFilter')?.value || '';
+        
+        let url = `${API_BASE}/documents/?page=${page}&per_page=20`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (docType) url += `&doc_type=${encodeURIComponent(docType)}`;
 
-        const params = new URLSearchParams({
-            page: page,
-            per_page: 20,
-            ...(search && { search }),
-            ...(status && { status }),
-            ...(docType && { doc_type: docType })
-        });
-
-        const response = await auth.fetchWithAuth(`${API_BASE}/documents/?${params}`);
+        const response = await auth.fetchWithAuth(url);
         const data = await response.json();
 
+        // ✅ CORREÇÃO: Backend retorna { success, data: { documents, pagination } }
         if (data.success) {
             documentsData = data.data.documents;
-            displayDocuments(data.data.documents);
-            updatePagination(data.data.pagination);
+            currentPage = page;
+            renderDocuments(documentsData);
+            renderPagination(data.data.pagination);
         } else {
             showToast('Erro ao carregar documentos', 'error');
         }
+
     } catch (error) {
-        console.error('Documents error:', error);
+        console.error('Load documents error:', error);
         showToast('Erro de conexão', 'error');
     }
 }
 
-function displayDocuments(documents) {
-    const grid = document.getElementById('documentsGrid');
-    const bulkActionsBar = document.getElementById('bulkActionsBar');
-    
+function renderDocuments(documents) {
+    const tbody = document.getElementById('documentsTableBody');
+    if (!tbody) return;
+
     if (!documents || documents.length === 0) {
-        grid.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-folder-open"></i>
-                <h3>Nenhum documento encontrado</h3>
-                <p>Faça upload de alguns PDFs para começar</p>
-            </div>
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="empty-state">
+                    Nenhum documento encontrado. Faça upload de PDFs para começar.
+                </td>
+            </tr>
         `;
-        bulkActionsBar.style.display = 'none';
         return;
     }
-    
-    // ✅ Mostrar barra de ações se houver documentos
-    bulkActionsBar.style.display = 'flex';
-    
-    const docsHTML = documents.map(doc => `
-        <div class="document-card ${selectedDocumentIds.has(doc.id) ? 'selected' : ''}" data-id="${doc.id}">
-            <!-- ✅ NOVO: Checkbox de seleção -->
-            <div class="doc-checkbox-container">
-                <input 
-                    type="checkbox" 
-                    class="doc-checkbox" 
-                    data-doc-id="${doc.id}"
-                    ${selectedDocumentIds.has(doc.id) ? 'checked' : ''}
-                    onclick="toggleDocumentSelection(${doc.id})"
-                />
-            </div>
-            
-            <div class="doc-header">
-                <h3>${doc.title || doc.original_filename}</h3>
-                <span class="doc-id">${doc.identifier}</span>
-            </div>
-            <div class="doc-meta">
-                <p><i class="fas fa-user"></i> ${doc.author || 'N/A'}</p>
-                <p><i class="fas fa-calendar"></i> ${formatDate(doc.created_at)}</p>
-                <p><i class="fas fa-tag"></i> ${doc.doc_type || 'Sem tipo'}</p>
-            </div>
-            <div class="doc-status">
-                <span class="status-badge status-${doc.status}">${doc.status}</span>
-                ${doc.is_signed ? '<i class="fas fa-signature signed" title="Assinado"></i>' : '<i class="fas fa-signature unsigned" title="Não assinado"></i>'}
-            </div>
-            <div class="doc-actions">
-                <button onclick="showDocumentDetails(${doc.id})" class="btn-info">
-                    <i class="fas fa-eye"></i> Detalhes
+
+    const rows = documents.map(doc => `
+        <tr data-doc-id="${doc.id}">
+            <td>
+                <input type="checkbox" 
+                       class="doc-checkbox" 
+                       value="${doc.id}" 
+                       onchange="toggleDocumentSelection(${doc.id})">
+            </td>
+            <td>${doc.id}</td>
+            <td>
+                <strong>${doc.title || doc.original_filename}</strong>
+                <br><small>${doc.original_filename}</small>
+            </td>
+            <td>${doc.author || '-'}</td>
+            <td>${doc.doc_type || '-'}</td>
+            <td>${formatFileSize(doc.file_size)}</td>
+            <td>
+                <span class="badge ${doc.is_signed ? 'badge-success' : 'badge-secondary'}">
+                    ${doc.is_signed ? '✓ Assinado' : '⋯ Pendente'}
+                </span>
+            </td>
+            <td>${formatDate(doc.uploaded_at)}</td>
+            <td class="actions">
+                <button class="btn-icon" onclick="viewDocument(${doc.id})" title="Visualizar">
+                    👁️
                 </button>
-                <button onclick="downloadDocument(${doc.id})" class="btn-primary">
-                    <i class="fas fa-download"></i> Download
+                <button class="btn-icon" onclick="downloadDocument(${doc.id})" title="Download">
+                    📥
                 </button>
                 ${auth.hasPermission('delete') ? `
-                    <button onclick="deleteDocument(${doc.id})" class="btn-danger">
-                        <i class="fas fa-trash"></i> Deletar
+                    <button class="btn-icon btn-danger" onclick="deleteDocument(${doc.id})" title="Deletar">
+                        🗑️
                     </button>
                 ` : ''}
-            </div>
-        </div>
+            </td>
+        </tr>
     `).join('');
-    
-    grid.innerHTML = docsHTML;
-    updateBulkActionsUI();
+
+    tbody.innerHTML = rows;
 }
+
+function renderPagination(pagination) {
+    const paginationDiv = document.getElementById('pagination');
+    if (!paginationDiv) return;
+
+    const { current_page, pages, total } = pagination;
+
+    if (pages <= 1) {
+        paginationDiv.innerHTML = '';
+        return;
+    }
+
+    let paginationHTML = '<div class="pagination-controls">';
+
+    // Previous button
+    paginationHTML += `
+        <button class="btn-pagination" 
+                onclick="loadDocuments(${current_page - 1})" 
+                ${current_page === 1 ? 'disabled' : ''}>
+            ← Anterior
+        </button>
+    `;
+
+    // Page numbers
+    for (let i = 1; i <= Math.min(pages, 5); i++) {
+        paginationHTML += `
+            <button class="btn-pagination ${i === current_page ? 'active' : ''}" 
+                    onclick="loadDocuments(${i})">
+                ${i}
+            </button>
+        `;
+    }
+
+    // Next button
+    paginationHTML += `
+        <button class="btn-pagination" 
+                onclick="loadDocuments(${current_page + 1})" 
+                ${current_page === pages ? 'disabled' : ''}>
+            Próxima →
+        </button>
+    `;
+
+    paginationHTML += `<span class="pagination-info">Total: ${total} documentos</span></div>`;
+    paginationDiv.innerHTML = paginationHTML;
+}
+
+
+// =============================================================================
+// BATCH ACTIONS
+// =============================================================================
+
+function setupBatchActions() {
+    // Botão "Selecionar Todos"
+    const selectAllBtn = document.getElementById('selectAllBtn');
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', toggleSelectAll);
+    }
+
+    // Botão "Adicionar Metadados"
+    const batchMetadataBtn = document.getElementById('batchMetadataBtn');
+    if (batchMetadataBtn) {
+        batchMetadataBtn.addEventListener('click', openBatchMetadataModal);
+    }
+
+    // Botão "Deletar Selecionados"
+    const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+    if (batchDeleteBtn) {
+        batchDeleteBtn.addEventListener('click', deleteManyDocuments);
+    }
+}
+
+function toggleDocumentSelection(docId) {
+    if (selectedDocuments.has(docId)) {
+        selectedDocuments.delete(docId);
+    } else {
+        selectedDocuments.add(docId);
+    }
+    updateBatchActionsBar();
+}
+
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.doc-checkbox');
+    
+    if (selectedDocuments.size === documentsData.length) {
+        // Desmarcar todos
+        selectedDocuments.clear();
+        checkboxes.forEach(cb => cb.checked = false);
+    } else {
+        // Marcar todos
+        selectedDocuments.clear();
+        documentsData.forEach(doc => selectedDocuments.add(doc.id));
+        checkboxes.forEach(cb => cb.checked = true);
+    }
+    
+    updateBatchActionsBar();
+}
+
+function updateBatchActionsBar() {
+    const bar = document.getElementById('batchActionsBar');
+    const countSpan = document.getElementById('selectedCount');
+    
+    if (!bar) return;
+
+    if (selectedDocuments.size > 0) {
+        bar.style.display = 'flex';
+        if (countSpan) {
+            countSpan.textContent = selectedDocuments.size;
+        }
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+function openBatchMetadataModal() {
+    if (selectedDocuments.size === 0) {
+        showToast('Selecione pelo menos um documento', 'error');
+        return;
+    }
+
+    const modal = document.getElementById('batchMetadataModal');
+    const count = document.getElementById('batchDocCount');
+    
+    if (modal && count) {
+        count.textContent = selectedDocuments.size;
+        modal.style.display = 'block';
+    }
+}
+
+async function submitBatchMetadata(event) {
+    event.preventDefault();
+
+    const metadata = {
+        author: document.getElementById('batchAuthor')?.value || '',
+        subject: document.getElementById('batchSubject')?.value || '',
+        doc_type: document.getElementById('batchDocType')?.value || '',
+        keywords: document.getElementById('batchKeywords')?.value || ''
+    };
+
+    // Validação: pelo menos um campo preenchido
+    if (!metadata.author && !metadata.subject && !metadata.doc_type && !metadata.keywords) {
+        showToast('Preencha pelo menos um campo', 'error');
+        return;
+    }
+
+    // Mostrar progress
+    const progressDiv = document.getElementById('batchProgress');
+    if (progressDiv) {
+        progressDiv.style.display = 'block';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/documents/batch/metadata`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${auth.getToken()}`
+            },
+            body: JSON.stringify({
+                document_ids: Array.from(selectedDocuments),
+                metadata: metadata
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Iniciar polling do status
+            pollBatchStatus(data.task_id);
+        } else {
+            throw new Error(data.message || 'Erro ao processar');
+        }
+
+    } catch (error) {
+        console.error('Batch metadata error:', error);
+        showToast(`Erro: ${error.message}`, 'error');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
+    }
+}
+
+async function pollBatchStatus(taskId) {
+    const maxAttempts = 30;
+    let attempts = 0;
+
+    const interval = setInterval(async () => {
+        attempts++;
+
+        try {
+            const response = await fetch(`${API_BASE}/documents/batch/status/${taskId}`, {
+                headers: {
+                    'Authorization': `Bearer ${auth.getToken()}`
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                const status = data.status;
+                const result = data.result;
+
+                // Atualizar UI
+                updateBatchProgress(status, result);
+
+                // Verificar se concluído
+                if (status === 'completed' || status === 'failed') {
+                    clearInterval(interval);
+                    showBatchResults(status, result);
+                    
+                    // Recarregar documentos
+                    setTimeout(() => {
+                        loadDocuments(currentPage);
+                    }, 1500);
+                }
+            }
+
+            // Timeout
+            if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                showToast('Timeout: processamento demorou muito', 'error');
+            }
+
+        } catch (error) {
+            console.error('Poll error:', error);
+            clearInterval(interval);
+            showToast('Erro ao verificar status', 'error');
+        }
+
+    }, 1000); // Verificar a cada 1 segundo
+}
+
+function updateBatchProgress(status, result) {
+    const progressText = document.getElementById('batchProgressText');
+    const progressBar = document.getElementById('batchProgressBar');
+
+    if (progressText) {
+        if (result && result.total) {
+            const processed = result.success || 0;
+            progressText.textContent = `Processando: ${processed}/${result.total} documentos`;
+            
+            if (progressBar) {
+                const percentage = (processed / result.total) * 100;
+                progressBar.style.width = `${percentage}%`;
+            }
+        } else {
+            progressText.textContent = `Status: ${status}`;
+        }
+    }
+}
+
+function showBatchResults(status, result) {
+    const progressDiv = document.getElementById('batchProgress');
+    const resultsDiv = document.getElementById('batchResults');
+
+    if (progressDiv) progressDiv.style.display = 'none';
+    if (!resultsDiv) return;
+
+    if (status === 'completed') {
+        resultsDiv.innerHTML = `
+            <div class="success-message">
+                ✅ ${result.success} de ${result.total} documentos processados com sucesso!
+            </div>
+            <button class="btn-primary" onclick="closeBatchModal()">
+                Fechar e Atualizar
+            </button>
+        `;
+        resultsDiv.style.display = 'block';
+        showToast('Batch processing concluído!', 'success');
+    } else {
+        resultsDiv.innerHTML = `
+            <div class="error-message">
+                ❌ Erro no processamento
+                <p>${result.error || 'Erro desconhecido'}</p>
+            </div>
+            <button class="btn-secondary" onclick="closeBatchModal()">
+                Fechar
+            </button>
+        `;
+        resultsDiv.style.display = 'block';
+        showToast('Erro no batch processing', 'error');
+    }
+
+    // Limpar seleção
+    selectedDocuments.clear();
+    updateBatchActionsBar();
+}
+
+function closeBatchModal() {
+    const modal = document.getElementById('batchMetadataModal');
+    const form = document.getElementById('batchMetadataForm');
+    const progressDiv = document.getElementById('batchProgress');
+    const resultsDiv = document.getElementById('batchResults');
+
+    if (modal) modal.style.display = 'none';
+    if (form) form.reset();
+    if (progressDiv) progressDiv.style.display = 'none';
+    if (resultsDiv) resultsDiv.style.display = 'none';
+
+    // Recarregar documentos
+    loadDocuments(currentPage);
+}
+
 
 // =============================================================================
 // DOCUMENT ACTIONS
 // =============================================================================
 
-async function showDocumentDetails(docId) {
+async function viewDocument(docId) {
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`);
         const data = await response.json();
 
         if (data.success) {
-            displayDocumentModal(data.data);
+            showDocumentModal(data.data);
         } else {
-            showToast('Erro ao carregar detalhes', 'error');
+            showToast('Erro ao carregar documento', 'error');
         }
+
     } catch (error) {
-        console.error('Detalhes error:', error);
-        showToast('Erro ao carregar detalhes', 'error');
+        console.error('View document error:', error);
+        showToast('Erro de conexão', 'error');
     }
 }
 
-function displayDocumentModal(doc) {
-    const modal = document.getElementById('documentModal');
-    const details = document.getElementById('documentDetails');
-
-    let auditLogsHTML = '<div class="empty-state-small"><i class="fas fa-info-circle"></i> Nenhum registro encontrado</div>';
-
+async function downloadDocument(docId) {
     try {
-        if (doc.audit_logs && Array.isArray(doc.audit_logs) && doc.audit_logs.length > 0) {
-            const sortedLogs = [...doc.audit_logs].sort((a, b) => {
-                const dateA = new Date(a.timestamp);
-                const dateB = new Date(b.timestamp);
-                return dateB - dateA;
-            });
+        const response = await fetch(`${API_BASE}/documents/${docId}/download`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${auth.getToken()}`
+            }
+        });
 
-            auditLogsHTML = sortedLogs.map(log => {
-                const actionIcon = log.action === 'upload' ? 'cloud-upload-alt' :
-                    log.action === 'download' ? 'cloud-download-alt' :
-                        log.action === 'update' ? 'edit' :
-                            log.action === 'delete' ? 'trash' : 'history';
-
-                let description = log.description || 'Sem descrição';
-
-                if (log.action === 'upload' && description.includes('enviado')) {
-                    const match = description.match(/Documento (.+?) enviado/);
-                    if (match) {
-                        description = `Upload do documento ${match[1]}`;
-                    }
-                }
-
-                return `
-                    <div class="audit-item">
-                        <div class="audit-icon">
-                            <i class="fas fa-${actionIcon}"></i>
-                        </div>
-                        <div class="audit-content">
-                            <div class="audit-description">${description}</div>
-                            <div class="audit-meta">
-                                <i class="fas fa-clock"></i> ${log.timestamp ? formatDate(log.timestamp) : 'Data desconhecida'}
-                                ${log.ip_address ? ' • <i class="fas fa-network-wired"></i> ' + log.ip_address : ''}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-    } catch (error) {
-        console.error('Erro ao processar audit logs:', error);
-        auditLogsHTML = '<div class="error-state"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar histórico</div>';
-    }
-
-    const statusMap = {
-        'uploaded': { class: 'info', icon: 'cloud-upload-alt', text: 'Enviado' },
-        'processing': { class: 'warning', icon: 'spinner', text: 'Processando' },
-        'completed': { class: 'success', icon: 'check-circle', text: 'Concluído' },
-        'error': { class: 'danger', icon: 'exclamation-circle', text: 'Erro' }
-    };
-
-    const statusInfo = statusMap[doc.status] || { class: 'secondary', icon: 'info-circle', text: doc.status || 'Desconhecido' };
-
-    details.innerHTML = `
-        <div class="modal-content-wrapper">
-            <div class="modal-header-section">
-                <div class="modal-title-area">
-                    <h2 class="modal-title">
-                        <i class="fas fa-file-pdf"></i>
-                        ${doc.title || doc.original_filename || 'Documento sem título'}
-                    </h2>
-                    <span class="badge badge-${statusInfo.class}">
-                        <i class="fas fa-${statusInfo.icon}"></i>
-                        ${statusInfo.text}
-                    </span>
-                </div>
-            </div>
-
-            <div class="modal-body-section">
-                <div class="info-section">
-                    <h3 class="section-title">
-                        <i class="fas fa-info-circle"></i>
-                        Informações do Documento
-                    </h3>
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <span class="info-label">ID do Documento</span>
-                            <span class="info-value">${doc.identifier || 'N/A'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Nome do Arquivo</span>
-                            <span class="info-value">${doc.original_filename || 'N/A'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Tamanho</span>
-                            <span class="info-value">${doc.file_size ? formatFileSize(doc.file_size) : 'N/A'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Assinado</span>
-                            <span class="info-value">
-                                ${doc.is_signed ?
-            '<span class="badge badge-success"><i class="fas fa-check"></i> Sim</span>' :
-            '<span class="badge badge-secondary"><i class="fas fa-times"></i> Não</span>'}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="info-section">
-                    <h3 class="section-title">
-                        <i class="fas fa-tags"></i>
-                        Metadados
-                    </h3>
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <span class="info-label">Autor</span>
-                            <span class="info-value">${doc.author || 'Não informado'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Assunto</span>
-                            <span class="info-value">${doc.subject || 'Não informado'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Tipo</span>
-                            <span class="info-value">${doc.doc_type || 'Não classificado'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Criado por</span>
-                            <span class="info-value">Usuário #${doc.created_by || 'N/A'}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="info-section">
-                    <h3 class="section-title">
-                        <i class="fas fa-clock"></i>
-                        Datas
-                    </h3>
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <span class="info-label">Criado em</span>
-                            <span class="info-value">${doc.created_at ? formatDate(doc.created_at) : 'N/A'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Atualizado em</span>
-                            <span class="info-value">${doc.updated_at ? formatDate(doc.updated_at) : 'N/A'}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="info-section">
-                    <h3 class="section-title">
-                        <i class="fas fa-shield-alt"></i>
-                        Segurança
-                    </h3>
-                    <div class="info-item full-width">
-                        <span class="info-label">Hash SHA-256</span>
-                        <code class="hash-code">${doc.hash_sha256 || 'N/A'}</code>
-                    </div>
-                </div>
-
-                <div class="info-section">
-                    <h3 class="section-title">
-                        <i class="fas fa-history"></i>
-                        Histórico de Ações
-                    </h3>
-                    <div class="audit-logs-container">
-                        ${auditLogsHTML}
-                    </div>
-                </div>
-            </div>
-
-            <div class="modal-footer-section">
-                <button onclick="downloadDocument(${doc.id})" class="btn btn-primary">
-                    <i class="fas fa-download"></i>
-                    Download
-                </button>
-                ${auth.hasPermission('update') && doc.status === 'uploaded' ? `
-                    <button onclick="addMetadataForm(${doc.id})" class="btn btn-success">
-                        <i class="fas fa-edit"></i>
-                        Adicionar Metadados
-                    </button>
-                ` : ''}
-                <button onclick="document.getElementById('documentModal').style.display='none';" class="btn btn-secondary">
-                    <i class="fas fa-times"></i>
-                    Fechar
-                </button>
-            </div>
-        </div>
-    `;
-
-    modal.style.display = 'flex';
-}
-
-downloadDocument = async function (docId) {
-    try {
-        // Buscar dados do documento para pegar o nome do arquivo
-        const responseData = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`);
-        const jsonData = await responseData.json();
-        let filename = `documento_${docId}.pdf`;
-        if (jsonData.success && jsonData.data && jsonData.data.original_filename) {
-            filename = jsonData.data.original_filename;
-            // Forçar extensão PDF se não houver
-            if (!filename.toLowerCase().endsWith('.pdf')) filename += '.pdf';
-        }
-        const response = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}/download`);
         if (response.ok) {
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
+            
+            // Pegar filename do header Content-Disposition
+            const disposition = response.headers.get('Content-Disposition');
+            let filename = 'document.pdf';
+            if (disposition) {
+                const filenameMatch = disposition.match(/filename="?(.+)"?/);
+                if (filenameMatch) filename = filenameMatch[1];
+            }
+            
             a.download = filename;
             document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a);
+            a.remove();
             window.URL.revokeObjectURL(url);
+
             showToast('Download iniciado', 'success');
         } else {
-            showToast('Erro no download', 'error');
+            showToast('Erro ao baixar documento', 'error');
         }
+
     } catch (error) {
         console.error('Download error:', error);
-        showToast('Erro no download', 'error');
+        showToast('Erro de conexão', 'error');
     }
 }
 
@@ -853,395 +940,276 @@ async function deleteDocument(docId) {
     }
 
     try {
-        const response = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`, {
-            method: 'DELETE'
+        const response = await fetch(`${API_BASE}/documents/${docId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${auth.getToken()}`
+            }
         });
 
         const data = await response.json();
 
         if (data.success) {
             showToast('Documento deletado com sucesso', 'success');
-
             loadDocuments(currentPage);
-
-            const dashboardSection = document.getElementById('dashboardSection');
-            if (dashboardSection && dashboardSection.classList.contains('active')) {
-                loadDashboard();
-            }
-
         } else {
             showToast(data.message || 'Erro ao deletar', 'error');
         }
+
     } catch (error) {
         console.error('Delete error:', error);
-        showToast('Erro ao deletar documento', 'error');
+        showToast('Erro de conexão', 'error');
     }
 }
 
+async function deleteManyDocuments() {
+    if (selectedDocuments.size === 0) {
+        showToast('Selecione documentos para deletar', 'error');
+        return;
+    }
+
+    if (!confirm(`Deletar ${selectedDocuments.size} documentos selecionados?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/documents/delete_many`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${auth.getToken()}`
+            },
+            body: JSON.stringify({
+                document_ids: Array.from(selectedDocuments)
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(data.message, 'success');
+            selectedDocuments.clear();
+            updateBatchActionsBar();
+            loadDocuments(currentPage);
+        } else {
+            showToast(data.message || 'Erro ao deletar', 'error');
+        }
+
+    } catch (error) {
+        console.error('Delete many error:', error);
+        showToast('Erro de conexão', 'error');
+    }
+}
+
+
 // =============================================================================
-// USERS MANAGEMENT (Admin only)
+// MODALS
+// =============================================================================
+
+function setupModals() {
+    // Fechar modals ao clicar fora
+    window.onclick = (event) => {
+        if (event.target.classList.contains('modal')) {
+            event.target.style.display = 'none';
+        }
+    };
+
+    // Form de batch metadata
+    const batchForm = document.getElementById('batchMetadataForm');
+    if (batchForm) {
+        batchForm.addEventListener('submit', submitBatchMetadata);
+    }
+}
+
+function showDocumentModal(document) {
+    const modal = document.getElementById('documentModal');
+    const content = document.getElementById('documentModalContent');
+
+    if (!modal || !content) return;
+
+    const modalHTML = `
+        <h2>${document.title || document.original_filename}</h2>
+        <div class="document-details">
+            <div class="detail-row">
+                <strong>ID:</strong> ${document.id}
+            </div>
+            <div class="detail-row">
+                <strong>Arquivo:</strong> ${document.original_filename}
+            </div>
+            <div class="detail-row">
+                <strong>Autor:</strong> ${document.author || '-'}
+            </div>
+            <div class="detail-row">
+                <strong>Assunto:</strong> ${document.subject || '-'}
+            </div>
+            <div class="detail-row">
+                <strong>Tipo:</strong> ${document.doc_type || '-'}
+            </div>
+            <div class="detail-row">
+                <strong>Palavras-chave:</strong> ${document.keywords || '-'}
+            </div>
+            <div class="detail-row">
+                <strong>Tamanho:</strong> ${formatFileSize(document.file_size)}
+            </div>
+            <div class="detail-row">
+                <strong>Hash:</strong> <code>${document.file_hash}</code>
+            </div>
+            <div class="detail-row">
+                <strong>Upload:</strong> ${formatDate(document.uploaded_at)}
+            </div>
+            <div class="detail-row">
+                <strong>Assinado:</strong> 
+                <span class="badge ${document.is_signed ? 'badge-success' : 'badge-secondary'}">
+                    ${document.is_signed ? '✓ Sim' : '✗ Não'}
+                </span>
+            </div>
+        </div>
+        
+        <div class="modal-actions">
+            <button class="btn-primary" onclick="downloadDocument(${document.id})">
+                📥 Download
+            </button>
+            ${auth.hasPermission('delete') ? `
+                <button class="btn-danger" onclick="deleteDocument(${document.id}); closeDocumentModal();">
+                    🗑️ Deletar
+                </button>
+            ` : ''}
+            <button class="btn-secondary" onclick="closeDocumentModal()">
+                Fechar
+            </button>
+        </div>
+    `;
+
+    content.innerHTML = modalHTML;
+    modal.style.display = 'block';
+}
+
+function closeDocumentModal() {
+    const modal = document.getElementById('documentModal');
+    if (modal) modal.style.display = 'none';
+}
+
+
+// =============================================================================
+// USERS MANAGEMENT (ADMIN ONLY)
 // =============================================================================
 
 async function loadUsers() {
-    if (!auth.hasRole('admin')) return;
+    if (!auth.isAdmin()) {
+        showToast('Acesso negado', 'error');
+        return;
+    }
 
     try {
         const response = await auth.fetchWithAuth(`${API_BASE}/auth/users`);
         const data = await response.json();
 
-        if (data.success) {
-            displayUsers(data.data);
+        if (response.ok) {
+            renderUsers(data.users);
+        } else {
+            showToast('Erro ao carregar usuários', 'error');
         }
+
     } catch (error) {
-        showToast('Erro ao carregar usuários', 'error');
+        console.error('Load users error:', error);
+        showToast('Erro de conexão', 'error');
     }
 }
 
-function displayUsers(users) {
-    const grid = document.getElementById('usersGrid');
+function renderUsers(users) {
+    const tbody = document.getElementById('usersTableBody');
+    if (!tbody) return;
 
-    const usersHTML = users.map(user => `
-        <div class="user-card">
-            <div class="user-info">
-                <h3>${user.name}</h3>
-                <p>${user.email}</p>
-                <span class="role-badge role-${user.role}">${user.role.toUpperCase()}</span>
-                <span class="status-badge ${user.is_active ? 'active' : 'inactive'}">
+    if (!users || users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6">Nenhum usuário encontrado</td></tr>';
+        return;
+    }
+
+    const rows = users.map(user => `
+        <tr>
+            <td>${user.id}</td>
+            <td>${user.name}</td>
+            <td>${user.email}</td>
+            <td>
+                <span class="badge badge-${user.role}">${user.role.toUpperCase()}</span>
+            </td>
+            <td>
+                <span class="badge ${user.is_active ? 'badge-success' : 'badge-danger'}">
                     ${user.is_active ? 'Ativo' : 'Inativo'}
                 </span>
-            </div>
-            <div class="user-meta">
-                <small>Criado: ${formatDate(user.created_at)}</small>
-                ${user.last_login ? `<small>Último login: ${formatDate(user.last_login)}</small>` : ''}
-            </div>
-        </div>
+            </td>
+            <td>
+                <button class="btn-icon" onclick="editUser(${user.id})" title="Editar">
+                    ✏️
+                </button>
+                ${user.id !== auth.getUserInfo().id ? `
+                    <button class="btn-icon btn-danger" onclick="deleteUser(${user.id})" title="Deletar">
+                        🗑️
+                    </button>
+                ` : ''}
+            </td>
+        </tr>
     `).join('');
 
-    grid.innerHTML = usersHTML;
+    tbody.innerHTML = rows;
 }
 
-// =============================================================================
-// MODALS SYSTEM
-// =============================================================================
-
-function setupModals() {
-    const modals = document.querySelectorAll('.modal');
-    const closeButtons = document.querySelectorAll('.close');
-
-    closeButtons.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.target.closest('.modal').style.display = 'none';
-        });
-    });
-
-    window.addEventListener('click', (e) => {
-        if (e.target.classList.contains('modal')) {
-            e.target.style.display = 'none';
-        }
-    });
-
-    const addUserBtn = document.getElementById('addUserBtn');
-    const addUserModal = document.getElementById('addUserModal');
-    const addUserForm = document.getElementById('addUserForm');
-
-    if (addUserBtn) {
-        addUserBtn.addEventListener('click', () => {
-            addUserModal.style.display = 'flex';
-        });
-    }
-
-    if (addUserForm) {
-        addUserForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await createUser();
-        });
-    }
-}
-
-async function createUser() {
-    const name = document.getElementById('userName').value;
-    const email = document.getElementById('userEmail').value;
-    const password = document.getElementById('userPassword').value;
-    const role = document.getElementById('userRole').value;
-
-    try {
-        const response = await auth.fetchWithAuth(`${API_BASE}/auth/users`, {
-            method: 'POST',
-            body: JSON.stringify({ name, email, password, role })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            showToast('Usuário criado com sucesso', 'success');
-            document.getElementById('addUserModal').style.display = 'none';
-            document.getElementById('addUserForm').reset();
-            loadUsers();
-        } else {
-            showToast(data.message || 'Erro ao criar usuário', 'error');
-        }
-    } catch (error) {
-        showToast('Erro ao criar usuário', 'error');
-    }
-}
 
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
 
-function formatDate(dateString, format = 'long') {
-    if (!dateString) return 'N/A';
-
-    try {
-        // Garante parse ISO UTC (mesmo sem especificar Z)
-        let date = new Date(dateString);
-        if (typeof dateString === 'string' && !dateString.endsWith('Z')) {
-            // Força interpretação como UTC se o ISO não tiver 'Z' (algumas libs omitem)
-            date = new Date(dateString + 'Z');
-        }
-
-        if (isNaN(date.getTime())) {
-            return 'Data inválida';
-        }
-
-        const timezoneOptions = {
-            timeZone: 'America/Sao_Paulo',
-            hour12: false
-        };
-
-        if (format === 'short') {
-            return date.toLocaleDateString('pt-BR', {
-                ...timezoneOptions,
-                day: '2-digit',
-                month: '2-digit'
-            });
-        }
-        return date.toLocaleString('pt-BR', {
-            ...timezoneOptions,
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    } catch (error) {
-        console.error('Erro ao formatar data:', error);
-        return 'N/A';
-    }
-}
-
-
 function formatFileSize(bytes) {
-    if (!bytes || isNaN(bytes)) return 'N/A';
-
-    try {
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(1024));
-        return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
-    } catch (error) {
-        console.error('Erro ao formatar tamanho:', error);
-        return 'N/A';
-    }
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function updatePagination(pagination) {
-    const paginationDiv = document.getElementById('pagination');
-
-    if (!pagination || pagination.pages <= 1) {
-        paginationDiv.innerHTML = '';
-        return;
-    }
-
-    let paginationHTML = `
-        <div class="pagination-info">
-            Página ${pagination.current_page} de ${pagination.pages} 
-            (${pagination.total} documentos)
-        </div>
-        <div class="pagination-buttons">
-    `;
-
-    if (pagination.current_page > 1) {
-        paginationHTML += `
-            <button onclick="loadDocuments(${pagination.current_page - 1})" class="btn-secondary">
-                <i class="fas fa-chevron-left"></i> Anterior
-            </button>
-        `;
-    }
-
-    const startPage = Math.max(1, pagination.current_page - 2);
-    const endPage = Math.min(pagination.pages, pagination.current_page + 2);
-
-    for (let i = startPage; i <= endPage; i++) {
-        paginationHTML += `
-            <button onclick="loadDocuments(${i})" class="btn-${i === pagination.current_page ? 'primary' : 'secondary'}">
-                ${i}
-            </button>
-        `;
-    }
-
-    if (pagination.current_page < pagination.pages) {
-        paginationHTML += `
-            <button onclick="loadDocuments(${pagination.current_page + 1})" class="btn-secondary">
-                Próximo <i class="fas fa-chevron-right"></i>
-            </button>
-        `;
-    }
-
-    paginationHTML += '</div>';
-    paginationDiv.innerHTML = paginationHTML;
-}
-
-setTimeout(() => {
-    const searchBtn = document.getElementById('searchBtn');
-    if (searchBtn) {
-        searchBtn.addEventListener('click', () => {
-            currentPage = 1;
-            loadDocuments(1);
-        });
-    }
-
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                currentPage = 1;
-                loadDocuments(1);
-            }
-        });
-    }
-}, 1000);
-
-// =============================================================================
-// SELEÇÃO MÚLTIPLA DE DOCUMENTOS
-// =============================================================================
-
-function toggleDocumentSelection(docId) {
-    const card = document.querySelector(`.document-card[data-id="${docId}"]`);
-    const checkbox = card.querySelector('.doc-checkbox');
+function formatDate(dateString) {
+    if (!dateString) return '-';
     
-    if (checkbox.checked) {
-        selectedDocumentIds.add(docId);
-        card.classList.add('selected');
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    // Relativo para datas recentes
+    if (diffMins < 1) return 'Agora';
+    if (diffMins < 60) return `${diffMins}min atrás`;
+    if (diffHours < 24) return `${diffHours}h atrás`;
+    if (diffDays < 7) return `${diffDays}d atrás`;
+
+    // Data formatada para mais antigos
+    return date.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function showToast(message, type = 'info') {
+    if (window.showToast) {
+        window.showToast(message, type);
     } else {
-        selectedDocumentIds.delete(docId);
-        card.classList.remove('selected');
+        alert(message);
     }
-    
-    updateBulkActionsUI();
 }
 
-function updateBulkActionsUI() {
-    const selectAllCheckbox = document.getElementById('selectAllDocs');
-    const selectedCount = document.getElementById('selectedCount');
-    const downloadBtn = document.getElementById('downloadSelectedBtn');
-    const deleteBtn = document.getElementById('deleteSelectedBtn');
-    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
-    
-    // Atualizar contador
-    selectedCount.textContent = `(${selectedDocumentIds.size} selecionados)`;
-    
-    // Atualizar checkbox "Selecionar Todos"
-    if (selectAllCheckbox) {
-        selectAllCheckbox.checked = allCheckboxes.length > 0 && 
-                                     selectedDocumentIds.size === allCheckboxes.length;
-        selectAllCheckbox.indeterminate = selectedDocumentIds.size > 0 && 
-                                          selectedDocumentIds.size < allCheckboxes.length;
-    }
-    
-    // Ativar/desativar botões
-    const hasSelection = selectedDocumentIds.size > 0;
-    downloadBtn.disabled = !hasSelection;
-    deleteBtn.disabled = !hasSelection;
-}
 
-// Selecionar/Desselecionar todos
-document.addEventListener('DOMContentLoaded', function() {
-    const selectAllCheckbox = document.getElementById('selectAllDocs');
-    if (selectAllCheckbox) {
-        selectAllCheckbox.addEventListener('change', function() {
-            const checkboxes = document.querySelectorAll('.doc-checkbox');
-            checkboxes.forEach(checkbox => {
-                const docId = parseInt(checkbox.dataset.docId);
-                checkbox.checked = selectAllCheckbox.checked;
-                
-                if (selectAllCheckbox.checked) {
-                    selectedDocumentIds.add(docId);
-                    checkbox.closest('.document-card').classList.add('selected');
-                } else {
-                    selectedDocumentIds.delete(docId);
-                    checkbox.closest('.document-card').classList.remove('selected');
-                }
-            });
-            updateBulkActionsUI();
-        });
-    }
-});
+// =============================================================================
+// EXPORTAR FUNÇÕES GLOBAIS
+// =============================================================================
 
-// Download múltiplo
-document.addEventListener('DOMContentLoaded', function() {
-    const downloadBtn = document.getElementById('downloadSelectedBtn');
-    if (downloadBtn) {
-        downloadBtn.addEventListener('click', async function() {
-            if (selectedDocumentIds.size === 0) return;
-            
-            showToast(`Iniciando download de ${selectedDocumentIds.size} arquivos...`, 'info');
-            
-            // Download com delay para não sobrecarregar
-            const ids = Array.from(selectedDocumentIds);
-            for (let i = 0; i < ids.length; i++) {
-                await downloadDocument(ids[i]);
-                // Pequeno delay entre downloads
-                if (i < ids.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-            }
-            
-            showToast('Downloads concluídos!', 'success');
-        });
-    }
-});
-
-// Deleção múltipla
-document.addEventListener('DOMContentLoaded', function() {
-    const deleteBtn = document.getElementById('deleteSelectedBtn');
-    if (deleteBtn) {
-        deleteBtn.addEventListener('click', async function() {
-            if (selectedDocumentIds.size === 0) return;
-            
-            const count = selectedDocumentIds.size;
-            if (!confirm(`Tem certeza que deseja deletar ${count} documentos selecionados?`)) {
-                return;
-            }
-            
-            try {
-                const ids = Array.from(selectedDocumentIds);
-                const response = await auth.fetchWithAuth(`${API_BASE}/documents/delete_many`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ document_ids: ids })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    showToast(`${data.deleted} documentos deletados com sucesso!`, 'success');
-                    selectedDocumentIds.clear();
-                    loadDocuments(currentPage);
-                    
-                    // Atualizar dashboard se estiver ativo
-                    const dashboardSection = document.getElementById('dashboardSection');
-                    if (dashboardSection && dashboardSection.classList.contains('active')) {
-                        loadDashboard();
-                    }
-                } else {
-                    showToast(data.message || 'Erro ao deletar documentos', 'error');
-                }
-            } catch (error) {
-                console.error('Delete multiple error:', error);
-                showToast('Erro ao deletar documentos', 'error');
-            }
-        });
-    }
-});
+window.loadDocuments = loadDocuments;
+window.toggleDocumentSelection = toggleDocumentSelection;
+window.viewDocument = viewDocument;
+window.downloadDocument = downloadDocument;
+window.deleteDocument = deleteDocument;
+window.closeBatchModal = closeBatchModal;
+window.closeDocumentModal = closeDocumentModal;
