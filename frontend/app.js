@@ -156,38 +156,120 @@ async function loadTimelineChart() {
         const response = await auth.fetchWithAuth(`${API_BASE}/analytics/charts/documents-timeline`);
         const data = await response.json();
 
-        if (data.success && data.data.basic.length > 0) {
+        if (!data.success || !data.data || !data.data.basic || data.data.basic.length === 0) {
+            console.log('📊 Timeline chart: sem dados disponíveis');
             const ctx = document.getElementById('timelineChart');
-            if (!ctx) return;
-
-            if (chartsInstances.timeline) {
-                chartsInstances.timeline.destroy();
+            if (ctx && ctx.parentElement) {
+                ctx.parentElement.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 250px; color: #999;">
+                        <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
+                        <p style="font-size: 14px; margin: 0;">Nenhum upload nos últimos 30 dias</p>
+                    </div>
+                `;
             }
-
-            chartsInstances.timeline = new Chart(ctx.getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: data.data.basic.map(item => item.date),
-                    datasets: [{
-                        label: 'Documentos',
-                        data: data.data.basic.map(item => item.count),
-                        borderColor: '#2196F3',
-                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                        tension: 0.4,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: { beginAtZero: true }
-                    }
-                }
-            });
+            return;
         }
+
+        const ctx = document.getElementById('timelineChart');
+        if (!ctx) return;
+
+        if (chartsInstances.timeline) {
+            chartsInstances.timeline.destroy();
+        }
+
+        // ✅ CORREÇÃO: Remover maintainAspectRatio
+        chartsInstances.timeline = new Chart(ctx.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: data.data.basic.map(item => {
+                    const date = new Date(item.date);
+                    return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+                }),
+                datasets: [{
+                    label: 'Documentos',
+                    data: data.data.basic.map(item => item.count),
+                    borderColor: '#2196F3',
+                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 5,
+                    pointHoverRadius: 8,
+                    pointBackgroundColor: '#2196F3',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointHoverBackgroundColor: '#fff',
+                    pointHoverBorderColor: '#2196F3',
+                    pointHoverBorderWidth: 3,
+                    borderWidth: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                // ✅ REMOVIDO: maintainAspectRatio: false (causa o bug)
+                aspectRatio: 2,  // ✅ ADICIONADO: Controlar proporção (largura:altura = 2:1)
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        titleColor: '#fff',
+                        bodyColor: '#fff',
+                        padding: 12,
+                        displayColors: false,
+                        callbacks: {
+                            title: function(context) {
+                                const index = context[0].dataIndex;
+                                const date = new Date(data.data.basic[index].date);
+                                return date.toLocaleDateString('pt-BR', { 
+                                    weekday: 'short', 
+                                    day: '2-digit', 
+                                    month: 'short' 
+                                });
+                            },
+                            label: function(context) {
+                                const count = context.parsed.y;
+                                return `${count} documento${count !== 1 ? 's' : ''} enviado${count !== 1 ? 's' : ''}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1,
+                            color: '#999',
+                            font: {
+                                size: 12
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)',
+                            drawBorder: false
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            color: '#999',
+                            font: {
+                                size: 11
+                            },
+                            maxRotation: 45,
+                            minRotation: 45
+                        },
+                        grid: {
+                            display: false,
+                            drawBorder: false
+                        }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                }
+            }
+        });
     } catch (error) {
         console.error('Timeline chart error:', error);
     }
@@ -879,17 +961,22 @@ function closeBatchModal() {
 
 async function viewDocument(docId) {
     try {
+        console.log('📄 Carregando documento ID:', docId);
+        
         const response = await auth.fetchWithAuth(`${API_BASE}/documents/${docId}`);
         const data = await response.json();
 
-        if (data.success) {
+        console.log('✅ Resposta do backend:', data);
+
+        if (data.success && data.data) {
             showDocumentModal(data.data);
         } else {
-            showToast('Erro ao carregar documento', 'error');
+            console.error('❌ Resposta sem sucesso:', data);
+            showToast(data.message || 'Erro ao carregar documento', 'error');
         }
 
     } catch (error) {
-        console.error('View document error:', error);
+        console.error('❌ View document error:', error);
         showToast('Erro de conexão', 'error');
     }
 }
@@ -1021,56 +1108,106 @@ function setupModals() {
     }
 }
 
-function showDocumentModal(document) {
-    const modal = document.getElementById('documentModal');
+function showDocumentModal(doc) {  // ✅ Mudou de 'document' para 'doc'
+    console.log('🔍 Abrindo modal para documento:', doc);
+    
+    const modal = document.getElementById('documentModal');  // ✅ Agora funciona!
     const content = document.getElementById('documentModalContent');
 
-    if (!modal || !content) return;
+    if (!modal) {
+        console.error('❌ Modal #documentModal não encontrado no HTML');
+        return;
+    }
+
+    if (!content) {
+        console.error('❌ Content #documentModalContent não encontrado no HTML');
+        return;
+    }
 
     const modalHTML = `
-        <h2>${document.title || document.original_filename}</h2>
         <div class="document-details">
             <div class="detail-row">
-                <strong>ID:</strong> ${document.id}
+                <strong>ID:</strong>
+                <span>${doc.id}</span>
             </div>
             <div class="detail-row">
-                <strong>Arquivo:</strong> ${document.original_filename}
+                <strong>Título:</strong>
+                <span>${doc.title || '-'}</span>
             </div>
             <div class="detail-row">
-                <strong>Autor:</strong> ${document.author || '-'}
+                <strong>Arquivo Original:</strong>
+                <span>${doc.original_filename}</span>
             </div>
             <div class="detail-row">
-                <strong>Assunto:</strong> ${document.subject || '-'}
+                <strong>Autor:</strong>
+                <span>${doc.author || '-'}</span>
             </div>
             <div class="detail-row">
-                <strong>Tipo:</strong> ${document.doc_type || '-'}
+                <strong>Assunto:</strong>
+                <span>${doc.subject || '-'}</span>
             </div>
             <div class="detail-row">
-                <strong>Palavras-chave:</strong> ${document.keywords || '-'}
+                <strong>Tipo:</strong>
+                <span>${doc.doc_type || '-'}</span>
             </div>
             <div class="detail-row">
-                <strong>Tamanho:</strong> ${formatFileSize(document.file_size)}
+                <strong>Palavras-chave:</strong>
+                <span>${doc.keywords || '-'}</span>
             </div>
             <div class="detail-row">
-                <strong>Hash:</strong> <code>${document.file_hash}</code>
+                <strong>Tamanho:</strong>
+                <span>${formatFileSize(doc.file_size)}</span>
             </div>
             <div class="detail-row">
-                <strong>Upload:</strong> ${formatDate(document.uploaded_at)}
+                <strong>Hash SHA-256:</strong>
+                <span><code style="font-size: 11px; word-break: break-all;">${doc.file_hash}</code></span>
             </div>
             <div class="detail-row">
-                <strong>Assinado:</strong> 
-                <span class="badge ${document.is_signed ? 'badge-success' : 'badge-secondary'}">
-                    ${document.is_signed ? '✓ Sim' : '✗ Não'}
+                <strong>Upload:</strong>
+                <span>${formatDate(doc.uploaded_at)}</span>
+            </div>
+            <div class="detail-row">
+                <strong>Última Atualização:</strong>
+                <span>${formatDate(doc.updated_at)}</span>
+            </div>
+            <div class="detail-row">
+                <strong>Assinado:</strong>
+                <span class="badge ${doc.is_signed ? 'badge-success' : 'badge-secondary'}">
+                    ${doc.is_signed ? '✓ Sim' : '✗ Não'}
                 </span>
             </div>
+            ${doc.signed_at ? `
+                <div class="detail-row">
+                    <strong>Data da Assinatura:</strong>
+                    <span>${formatDate(doc.signed_at)}</span>
+                </div>
+            ` : ''}
         </div>
+
+        ${doc.audit_logs && doc.audit_logs.length > 0 ? `
+            <div class="audit-logs-section">
+                <h3>📋 Histórico de Auditoria</h3>
+                <div class="audit-logs-list">
+                    ${doc.audit_logs.map(log => `
+                        <div class="audit-log-item">
+                            <div class="log-icon">🔔</div>
+                            <div class="log-info">
+                                <strong>${log.action}</strong>
+                                <p>${log.description || '-'}</p>
+                                <small>${formatDate(log.timestamp)}${log.ip_address ? ` • IP: ${log.ip_address}` : ''}</small>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        ` : ''}
         
         <div class="modal-actions">
-            <button class="btn-primary" onclick="downloadDocument(${document.id})">
+            <button class="btn-primary" onclick="downloadDocument(${doc.id})">
                 📥 Download
             </button>
             ${auth.hasPermission('delete') ? `
-                <button class="btn-danger" onclick="deleteDocument(${document.id}); closeDocumentModal();">
+                <button class="btn-danger" onclick="if(confirm('Deletar documento?')) { deleteDocument(${doc.id}); closeDocumentModal(); }">
                     🗑️ Deletar
                 </button>
             ` : ''}
@@ -1082,13 +1219,17 @@ function showDocumentModal(document) {
 
     content.innerHTML = modalHTML;
     modal.style.display = 'block';
+    
+    console.log('✅ Modal exibido com sucesso');
 }
 
 function closeDocumentModal() {
     const modal = document.getElementById('documentModal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+        modal.style.display = 'none';
+        console.log('✅ Modal fechado');
+    }
 }
-
 
 // =============================================================================
 // USERS MANAGEMENT (ADMIN ONLY)
@@ -1154,7 +1295,6 @@ function renderUsers(users) {
     tbody.innerHTML = rows;
 }
 
-
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
@@ -1192,15 +1332,6 @@ function formatDate(dateString) {
         minute: '2-digit'
     });
 }
-
-function showToast(message, type = 'info') {
-    if (window.showToast) {
-        window.showToast(message, type);
-    } else {
-        alert(message);
-    }
-}
-
 
 // =============================================================================
 // EXPORTAR FUNÇÕES GLOBAIS

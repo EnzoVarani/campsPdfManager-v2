@@ -5,11 +5,13 @@ Rotas para analytics e dashboard
 from flask import Blueprint, jsonify, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
-from sqlalchemy import func, desc, extract
-from app.models import Document, AuditLog, User, db
+from sqlalchemy import func, desc
+from app.extensions import db
+from app.models import Document, AuditLog, User
 from app.utils.decorators import admin_required
 
 analytics_bp = Blueprint('analytics', __name__)
+
 
 @analytics_bp.route('/dashboard/summary', methods=['GET'])
 @jwt_required()
@@ -17,7 +19,7 @@ def dashboard_summary():
     """Resumo geral do dashboard"""
     try:
         current_user_id = get_jwt_identity()
-        user = User.query.get(current_user_id)
+        user = User.query.get(int(current_user_id))
         
         # Contadores básicos
         total_documents = Document.query.count()
@@ -26,38 +28,30 @@ def dashboard_summary():
         # Documentos por período
         today = datetime.utcnow().date()
         documents_today = Document.query.filter(
-            func.date(Document.created_at) == today
+            func.date(Document.uploaded_at) == today
         ).count()
         
         week_ago = datetime.utcnow() - timedelta(days=7)
         documents_week = Document.query.filter(
-            Document.created_at >= week_ago
+            Document.uploaded_at >= week_ago
         ).count()
         
         month_ago = datetime.utcnow() - timedelta(days=30)
         documents_month = Document.query.filter(
-            Document.created_at >= month_ago
+            Document.uploaded_at >= month_ago
         ).count()
         
-        # Estatísticas por status
-        status_counts = db.session.query(
-            Document.status,
-            func.count(Document.id).label('count')
-        ).group_by(Document.status).all()
+        # Documentos recentes
+        recent_query = Document.query.order_by(desc(Document.uploaded_at)).limit(5)
         
-        status_summary = {status: count for status, count in status_counts}
-        
-        # Documentos recentes (baseado na permissão)
-        recent_query = Document.query.order_by(desc(Document.created_at)).limit(5)
         if user and not user.has_permission('manage_users'):
-            recent_query = recent_query.filter_by(created_by=current_user_id)
+            recent_query = recent_query.filter_by(uploaded_by=int(current_user_id))
         
         recent_docs = [{
             'id': doc.id,
-            'identifier': doc.identifier,
             'title': doc.title or doc.original_filename,
-            'status': doc.status,
-            'created_at': doc.created_at.isoformat()
+            'is_signed': doc.is_signed,
+            'uploaded_at': doc.uploaded_at.isoformat()
         } for doc in recent_query.all()]
         
         # Usuários ativos (apenas admins)
@@ -79,7 +73,6 @@ def dashboard_summary():
                     'active_users': active_users,
                     'total_users': total_users
                 },
-                'status_summary': status_summary,
                 'recent_documents': recent_docs,
                 'signing_rate': round((signed_documents / total_documents * 100) if total_documents > 0 else 0, 1)
             }
@@ -87,10 +80,13 @@ def dashboard_summary():
         
     except Exception as e:
         current_app.logger.error(f"Dashboard error: {str(e)}")
+        print(f"❌ Dashboard summary error: {e}")
         return jsonify({
             'success': False,
-            'message': 'Erro interno do servidor'
+            'message': 'Erro interno do servidor',
+            'error': str(e)
         }), 500
+
 
 @analytics_bp.route('/charts/documents-timeline', methods=['GET'])
 @jwt_required()
@@ -100,35 +96,54 @@ def documents_timeline():
         # Parâmetros de período
         days = request.args.get('days', 30, type=int)
         days = min(days, 365)  # Máximo 1 ano
-        
         start_date = datetime.utcnow() - timedelta(days=days)
         
         results = db.session.query(
-            func.date(Document.created_at).label('date'),
+            func.date(Document.uploaded_at).label('date'),
             func.count(Document.id).label('count')
         ).filter(
-            Document.created_at >= start_date
+            Document.uploaded_at >= start_date
         ).group_by(
-            func.date(Document.created_at)
+            func.date(Document.uploaded_at)
         ).order_by('date').all()
         
-        chart_data = [{
-            'date': date.isoformat(),
-            'count': count,
-            'day_name': date.strftime('%a')
-        } for date, count in results]
+        # ✅ CORREÇÃO: SQLite retorna string, não date object
+        chart_data = []
+        for date_str, count in results:
+            try:
+                # Converter string para date para poder formatar
+                date_obj = datetime.fromisoformat(str(date_str)).date()
+                chart_data.append({
+                    'date': str(date_str),  # String ISO format: '2025-11-11'
+                    'count': count,
+                    'day_name': date_obj.strftime('%a')  # 'Seg', 'Ter', etc
+                })
+            except Exception as e:
+                # Fallback: usar direto a string
+                chart_data.append({
+                    'date': str(date_str),
+                    'count': count,
+                    'day_name': ''
+                })
         
         return jsonify({
             'success': True,
             'data': {
+                'basic': chart_data,
                 'period_days': days,
-                'total_points': len(chart_data),
-                'timeline': chart_data
+                'total_points': len(chart_data)
             }
         }), 200
         
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        print(f"❌ Timeline error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
 
 @analytics_bp.route('/charts/documents-by-type', methods=['GET'])
 @jwt_required()
@@ -139,7 +154,7 @@ def documents_by_type():
             Document.doc_type,
             func.count(Document.id).label('count')
         ).filter(
-            Document.doc_type != ''
+            Document.doc_type.isnot(None)
         ).group_by(
             Document.doc_type
         ).order_by(desc('count')).all()
@@ -151,11 +166,18 @@ def documents_by_type():
         
         return jsonify({
             'success': True,
-            'data': chart_data
+            'data': {
+                'basic': chart_data
+            }
         }), 200
         
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        print(f"❌ Type chart error: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
 
 @analytics_bp.route('/charts/signature-status', methods=['GET'])
 @jwt_required()
@@ -165,63 +187,59 @@ def signature_status():
         signed = Document.query.filter_by(is_signed=True).count()
         unsigned = Document.query.filter_by(is_signed=False).count()
         
-        # Status detalhado se existir
-        detailed = db.session.query(
-            Document.signature_status,
-            func.count(Document.id).label('count')
-        ).filter(
-            Document.signature_status.isnot(None)
-        ).group_by(Document.signature_status).all()
-        
         return jsonify({
             'success': True,
             'data': {
                 'basic': [
                     {'status': 'Assinados', 'count': signed},
                     {'status': 'Não Assinados', 'count': unsigned}
-                ],
-                'detailed': [{
-                    'status': status or 'Indefinido',
-                    'count': count
-                } for status, count in detailed]
+                ]
             }
         }), 200
         
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        print(f"❌ Signature status error: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
 
 @analytics_bp.route('/reports/export', methods=['GET'])
 @jwt_required()
 def export_report():
     """Exportar dados para relatório"""
     try:
-        report_type = request.args.get('type', 'documents')  
-        format_type = request.args.get('format', 'json')    
-        
+        report_type = request.args.get('type', 'documents')
+        format_type = request.args.get('format', 'json')
         current_user_id = get_jwt_identity()
-        user = User.query.get(current_user_id)
+        user = User.query.get(int(current_user_id))
         
         if report_type == 'documents':
             query = Document.query
-            if user and not user.has_permission('manage_users'):
-                query = query.filter_by(created_by=current_user_id)
             
-            documents = query.order_by(desc(Document.created_at)).all()
+            if user and not user.has_permission('manage_users'):
+                query = query.filter_by(uploaded_by=int(current_user_id))
+            
+            documents = query.order_by(desc(Document.uploaded_at)).all()
             export_data = [doc.to_dict() for doc in documents]
             
         elif report_type == 'audit_log':
             query = AuditLog.query
+            
             if user and not user.has_permission('manage_users'):
-                user_docs = Document.query.filter_by(created_by=current_user_id).subquery()
-                query = query.filter(AuditLog.document_id.in_(
-                    db.session.query(user_docs.c.id)
-                ))
+                # Apenas logs de documentos do usuário
+                user_doc_ids = [d.id for d in Document.query.filter_by(uploaded_by=int(current_user_id)).all()]
+                query = query.filter(AuditLog.document_id.in_(user_doc_ids))
             
             logs = query.order_by(desc(AuditLog.timestamp)).limit(1000).all()
             export_data = [log.to_dict() for log in logs]
             
         else:
-            return jsonify({'success': False, 'message': 'Tipo inválido'}), 400
+            return jsonify({
+                'success': False,
+                'message': 'Tipo inválido'
+            }), 400
         
         return jsonify({
             'success': True,
@@ -236,4 +254,8 @@ def export_report():
         }), 200
         
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        print(f"❌ Export report error: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500

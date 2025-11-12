@@ -83,25 +83,26 @@ class Document(db.Model):
     file_size = db.Column(db.Integer, nullable=False)
     file_hash = db.Column(db.String(64), unique=True, nullable=False, index=True)
     
-    # Metadados básicos
     title = db.Column(db.String(255))
     author = db.Column(db.String(255))
     subject = db.Column(db.String(500))
     doc_type = db.Column(db.String(100))
     keywords = db.Column(db.String(500))
     
-    # Status e assinatura
     is_signed = db.Column(db.Boolean, default=False)
     signed_at = db.Column(db.DateTime)
     
-    # Timestamps
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relacionamentos
     uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     uploader = db.relationship('User', back_populates='documents')
-    audit_logs = db.relationship('AuditLog', back_populates='document', lazy=True, cascade='all, delete-orphan')
+    
+    # ✅ CORREÇÃO: Mudar lazy=True para lazy='dynamic'
+    audit_logs = db.relationship('AuditLog', 
+                                  back_populates='document', 
+                                  lazy='dynamic',  # ✅ MUDOU AQUI
+                                  cascade='all, delete-orphan')
     
     def to_dict(self):
         return {
