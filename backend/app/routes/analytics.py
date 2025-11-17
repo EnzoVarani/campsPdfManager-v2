@@ -5,10 +5,15 @@ Rotas para analytics e dashboard
 from flask import Blueprint, jsonify, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
+import pytz
 from sqlalchemy import func, desc
+
 from app.extensions import db
 from app.models import Document, AuditLog, User
 from app.utils.decorators import admin_required
+
+# ✅ Timezone do Brasil
+BR_TZ = pytz.timezone('America/Sao_Paulo')
 
 analytics_bp = Blueprint('analytics', __name__)
 
@@ -25,18 +30,20 @@ def dashboard_summary():
         total_documents = Document.query.count()
         signed_documents = Document.query.filter_by(is_signed=True).count()
         
-        # Documentos por período
-        today = datetime.utcnow().date()
+        # ✅ CORREÇÃO: Usar timezone do Brasil
+        now_br = datetime.now(BR_TZ)
+        today_br = now_br.date()
+        
         documents_today = Document.query.filter(
-            func.date(Document.uploaded_at) == today
+            func.date(Document.uploaded_at) == today_br
         ).count()
         
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_ago = now_br - timedelta(days=7)
         documents_week = Document.query.filter(
             Document.uploaded_at >= week_ago
         ).count()
         
-        month_ago = datetime.utcnow() - timedelta(days=30)
+        month_ago = now_br - timedelta(days=30)
         documents_month = Document.query.filter(
             Document.uploaded_at >= month_ago
         ).count()
@@ -93,10 +100,12 @@ def dashboard_summary():
 def documents_timeline():
     """Gráfico de documentos ao longo do tempo"""
     try:
-        # Parâmetros de período
         days = request.args.get('days', 30, type=int)
-        days = min(days, 365)  # Máximo 1 ano
-        start_date = datetime.utcnow() - timedelta(days=days)
+        days = min(days, 365)
+        
+        # ✅ CORREÇÃO: Usar timezone do Brasil
+        now_br = datetime.now(BR_TZ)
+        start_date = now_br - timedelta(days=days)
         
         results = db.session.query(
             func.date(Document.uploaded_at).label('date'),
@@ -107,19 +116,17 @@ def documents_timeline():
             func.date(Document.uploaded_at)
         ).order_by('date').all()
         
-        # ✅ CORREÇÃO: SQLite retorna string, não date object
         chart_data = []
         for date_str, count in results:
             try:
-                # Converter string para date para poder formatar
+                # ✅ CORREÇÃO: Parse da data corretamente
                 date_obj = datetime.fromisoformat(str(date_str)).date()
                 chart_data.append({
-                    'date': str(date_str),  # String ISO format: '2025-11-11'
+                    'date': str(date_str),
                     'count': count,
-                    'day_name': date_obj.strftime('%a')  # 'Seg', 'Ter', etc
+                    'day_name': date_obj.strftime('%a')
                 })
             except Exception as e:
-                # Fallback: usar direto a string
                 chart_data.append({
                     'date': str(date_str),
                     'count': count,
@@ -212,6 +219,7 @@ def export_report():
     try:
         report_type = request.args.get('type', 'documents')
         format_type = request.args.get('format', 'json')
+        
         current_user_id = get_jwt_identity()
         user = User.query.get(int(current_user_id))
         
@@ -234,19 +242,21 @@ def export_report():
             
             logs = query.order_by(desc(AuditLog.timestamp)).limit(1000).all()
             export_data = [log.to_dict() for log in logs]
-            
         else:
             return jsonify({
                 'success': False,
                 'message': 'Tipo inválido'
             }), 400
         
+        # ✅ CORREÇÃO: Usar timezone do Brasil
+        now_br = datetime.now(BR_TZ)
+        
         return jsonify({
             'success': True,
             'data': {
                 'report_type': report_type,
                 'format': format_type,
-                'generated_at': datetime.utcnow().isoformat(),
+                'generated_at': now_br.isoformat(),
                 'records_count': len(export_data),
                 'exported_by': user.email if user else 'unknown',
                 'data': export_data

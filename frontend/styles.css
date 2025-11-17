@@ -1056,9 +1056,12 @@ select.form-control {
   width: 100%;
   height: 100%;
   background: rgba(var(--color-slate-900-rgb), 0.7);
+  z-index: 1000;
+  /* ✅ CORREÇÃO: Centralização e scroll */
   justify-content: center;
   align-items: center;
-  z-index: 1000;
+  overflow-y: auto;
+  padding: var(--space-20);
 }
 
 .modal-content {

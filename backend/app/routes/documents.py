@@ -12,11 +12,16 @@ from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 import os
 from datetime import datetime
+import pytz
+
 from app.extensions import db
 from app.models import Document, AuditLog
 from app.services.pdf_service import PDFService
 from app.utils.helpers import allowed_file
 from app.utils.decorators import admin_required, user_required
+
+# ✅ Timezone do Brasil
+BR_TZ = pytz.timezone('America/Sao_Paulo')
 
 documents_bp = Blueprint('documents', __name__)
 
@@ -93,7 +98,10 @@ def upload_documents():
         
         try:
             filename = secure_filename(file.filename)
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            # ✅ CORREÇÃO: Timestamp com timezone do Brasil
+            now_br = datetime.now(BR_TZ)
+            timestamp = now_br.strftime('%Y%m%d_%H%M%S')
             unique_filename = f"{timestamp}_{filename}"
             filepath = os.path.join(upload_folder, unique_filename)
             
@@ -128,32 +136,35 @@ def upload_documents():
             # Informações do arquivo
             page_count = pdf_service.get_page_count(filepath)
             
-            # ✅ CORREÇÃO 1: Title automático com "Prontuário de"
+            # Title automático com "Prontuário de"
             clean_filename = filename.replace('.pdf', '').replace('.PDF', '')
             auto_title = f"Prontuário de {clean_filename}"
             
-            # Criar documento
+            # ✅ CORREÇÃO: Criar documento com timezone correto
             document = Document(
                 filename=unique_filename,
                 original_filename=filename,
                 file_path=filepath,
                 file_size=file_size,
                 file_hash=file_hash,
-                title=auto_title,  # ✅ TITLE AUTOMÁTICO
-                uploaded_by=user_id_int
+                title=auto_title,
+                uploaded_by=user_id_int,
+                uploaded_at=now_br,
+                updated_at=now_br
             )
             
             db.session.add(document)
             db.session.flush()
             
-            # Log de auditoria
+            # ✅ CORREÇÃO: Log de auditoria com timezone correto
             audit = AuditLog(
                 document_id=document.id,
                 user_id=user_id_int,
                 action='upload',
                 description=f'Documento "{auto_title}" enviado ({page_count} páginas)',
                 ip_address=request.remote_addr,
-                user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
+                user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None,
+                timestamp=now_br
             )
             
             db.session.add(audit)
@@ -163,15 +174,16 @@ def upload_documents():
                 'filename': filename,
                 'success': True,
                 'document_id': document.id,
-                'title': auto_title,  # ✅ Retornar o título gerado
+                'title': auto_title,
                 'hash': file_hash,
                 'size': file_size,
-                'pages': page_count
+                'pages': page_count,
+                'uploaded_at': now_br.isoformat()
             })
             
         except Exception as e:
             db.session.rollback()
-            if os.path.exists(filepath):
+            if 'filepath' in locals() and os.path.exists(filepath):
                 os.remove(filepath)
             results.append({
                 'filename': getattr(file, 'filename', 'unknown'),
@@ -208,13 +220,11 @@ def list_documents():
     
     doc_type = request.args.get('doc_type')
     if doc_type:
-        # ✅ CORREÇÃO 2: Normalizar doc_type na busca também
         query = query.filter(Document.doc_type == doc_type.lower())
     
     # Paginação
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
-    
     pagination = query.order_by(Document.uploaded_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
@@ -240,8 +250,12 @@ def get_document(doc_id):
     document = Document.query.get_or_404(doc_id)
     doc_dict = document.to_dict()
     
-    # Incluir logs de auditoria recentes
-    recent_logs = document.audit_logs.order_by(AuditLog.timestamp.desc()).limit(10).all()
+    # ✅ CORREÇÃO: Usar query() ao invés de acessar diretamente
+    recent_logs = AuditLog.query.filter_by(document_id=doc_id)\
+        .order_by(AuditLog.timestamp.desc())\
+        .limit(10)\
+        .all()
+    
     doc_dict['audit_logs'] = [log.to_dict() for log in recent_logs]
     
     return jsonify({
@@ -257,11 +271,12 @@ def add_metadata(doc_id):
     """Adiciona metadados a um documento"""
     current_user_id = get_jwt_identity()
     user_id_int = int(current_user_id)
-    
     document = Document.query.get_or_404(doc_id)
     data = request.get_json() or {}
     
     try:
+        now_br = datetime.now(BR_TZ)
+        
         # Atualizar metadados
         if 'title' in data:
             document.title = data['title']
@@ -270,11 +285,11 @@ def add_metadata(doc_id):
         if 'author' in data:
             document.author = data['author']
         if 'doc_type' in data:
-            # ✅ CORREÇÃO 2: Normalizar para minúsculo
             document.doc_type = data['doc_type'].lower() if data['doc_type'] else None
         if 'keywords' in data:
             document.keywords = data['keywords']
         
+        document.updated_at = now_br
         db.session.commit()
         
         # Log de auditoria
@@ -284,8 +299,10 @@ def add_metadata(doc_id):
             action='metadata_added',
             description=f'Metadados adicionados: {document.title}',
             ip_address=request.remote_addr,
-            user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
+            user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None,
+            timestamp=now_br
         )
+        
         db.session.add(audit)
         db.session.commit()
         
@@ -309,7 +326,6 @@ def download_document(doc_id):
     """Download do PDF"""
     current_user_id = get_jwt_identity()
     user_id_int = int(current_user_id)
-    
     document = Document.query.get_or_404(doc_id)
     
     # Verificar se arquivo existe
@@ -320,14 +336,17 @@ def download_document(doc_id):
         }), 404
     
     # Log de auditoria
+    now_br = datetime.now(BR_TZ)
     audit = AuditLog(
         document_id=document.id,
         user_id=user_id_int,
         action='download',
         description=f'Download do arquivo',
         ip_address=request.remote_addr,
-        user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
+        user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None,
+        timestamp=now_br
     )
+    
     db.session.add(audit)
     db.session.commit()
     
@@ -345,19 +364,20 @@ def delete_document(doc_id):
     """Deleta um documento"""
     current_user_id = get_jwt_identity()
     user_id_int = int(current_user_id)
-    
     document = Document.query.get_or_404(doc_id)
     
     try:
-        # Log ANTES de deletar
+        now_br = datetime.now(BR_TZ)
         audit = AuditLog(
             document_id=document.id,
             user_id=user_id_int,
             action='document_deleted',
             description=f'Documento "{document.title or document.original_filename}" deletado',
             ip_address=request.remote_addr,
-            user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
+            user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None,
+            timestamp=now_br
         )
+        
         db.session.add(audit)
         db.session.flush()
         
@@ -389,7 +409,6 @@ def delete_many_documents():
     """Deleta múltiplos documentos"""
     current_user_id = get_jwt_identity()
     user_id_int = int(current_user_id)
-    
     data = request.get_json() or {}
     document_ids = data.get('document_ids', [])
     
@@ -407,6 +426,7 @@ def delete_many_documents():
     
     deleted_count = 0
     errors = []
+    now_br = datetime.now(BR_TZ)
     
     try:
         for doc_id in document_ids:
@@ -423,8 +443,10 @@ def delete_many_documents():
                     action='document_deleted',
                     description=f'Documento "{document.title or document.original_filename}" deletado (lote)',
                     ip_address=request.remote_addr,
-                    user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None
+                    user_agent=request.headers.get('User-Agent', '')[:500] if request.headers.get('User-Agent') else None,
+                    timestamp=now_br
                 )
+                
                 db.session.add(audit)
                 db.session.flush()
                 
@@ -463,7 +485,6 @@ def batch_add_metadata():
     """Adiciona metadados em lote"""
     current_user_id = get_jwt_identity()
     user_id_int = int(current_user_id)
-    
     data = request.get_json() or {}
     document_ids = data.get('document_ids', [])
     metadata = data.get('metadata', {})
@@ -487,7 +508,7 @@ def batch_add_metadata():
             'message': 'Metadados são obrigatórios'
         }), 400
     
-    # ✅ CORREÇÃO 2: Normalizar doc_type ANTES de validar
+    # Normalizar doc_type
     if 'doc_type' in metadata and metadata['doc_type']:
         metadata['doc_type'] = metadata['doc_type'].lower()
     
@@ -504,6 +525,7 @@ def batch_add_metadata():
     
     # Verificar se documentos existem
     documents = Document.query.filter(Document.id.in_(document_ids)).all()
+    
     if len(documents) != len(document_ids):
         return jsonify({
             'success': False,
@@ -556,10 +578,13 @@ def get_batch_status(task_id):
 @jwt_required()
 def document_stats():
     """Estatísticas rápidas de documentos"""
+    now_br = datetime.now(BR_TZ)
+    today_br = now_br.date()
+    
     total = Document.query.count()
     signed = Document.query.filter_by(is_signed=True).count()
     today = Document.query.filter(
-        db.func.date(Document.uploaded_at) == datetime.utcnow().date()
+        db.func.date(Document.uploaded_at) == today_br
     ).count()
     
     return jsonify({

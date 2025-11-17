@@ -447,5 +447,181 @@
         updateBatchActionsBar();
       }
     </script>
+
+    <!-- ========================================
+     MODAL: CRIAR USUÁRIO
+     ======================================== -->
+    <div id="createUserModal" class="modal">
+      <div class="modal-content modal-sm">
+        <div class="modal-header">
+          <h3>➕ Criar Novo Usuário</h3>
+          <button class="close-btn" onclick="closeCreateUserModal()">
+            &times;
+          </button>
+        </div>
+
+        <form id="createUserForm" onsubmit="createUser(event)">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="newUserName">Nome Completo *</label>
+              <input
+                type="text"
+                id="newUserName"
+                name="name"
+                class="form-control"
+                placeholder="Ex: João Silva"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="newUserEmail">Email *</label>
+              <input
+                type="email"
+                id="newUserEmail"
+                name="email"
+                class="form-control"
+                placeholder="Ex: joao@camps.com"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="newUserPassword">Senha *</label>
+              <input
+                type="password"
+                id="newUserPassword"
+                name="password"
+                class="form-control"
+                placeholder="Mínimo 6 caracteres"
+                minlength="6"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="newUserRole">Nível de Acesso</label>
+              <select id="newUserRole" name="role" class="form-control">
+                <option value="viewer">Viewer - Apenas visualização</option>
+                <option value="user" selected>
+                  User - Envio e visualização
+                </option>
+                <option value="admin">Admin - Acesso completo</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input
+                  type="checkbox"
+                  id="newUserActive"
+                  name="is_active"
+                  checked
+                />
+                <span>Usuário ativo</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="closeCreateUserModal()"
+            >
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-primary">
+              ➕ Criar Usuário
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ========================================
+     MODAL: EDITAR USUÁRIO
+     ======================================== -->
+    <div id="editUserModal" class="modal">
+      <div class="modal-content modal-sm">
+        <div class="modal-header">
+          <h3>✏️ Editar Usuário</h3>
+          <button class="close-btn" onclick="closeEditUserModal()">
+            &times;
+          </button>
+        </div>
+
+        <form id="editUserForm" onsubmit="updateUser(event)">
+          <input type="hidden" id="editUserId" name="id" />
+
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="editUserName">Nome Completo *</label>
+              <input
+                type="text"
+                id="editUserName"
+                name="name"
+                class="form-control"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="editUserEmail">Email *</label>
+              <input
+                type="email"
+                id="editUserEmail"
+                name="email"
+                class="form-control"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="editUserPassword"
+                >Nova Senha (deixe em branco para manter)</label
+              >
+              <input
+                type="password"
+                id="editUserPassword"
+                name="password"
+                class="form-control"
+                placeholder="Preencha apenas se quiser alterar"
+                minlength="6"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="editUserRole">Nível de Acesso</label>
+              <select id="editUserRole" name="role" class="form-control">
+                <option value="viewer">Viewer - Apenas visualização</option>
+                <option value="user">User - Envio e visualização</option>
+                <option value="admin">Admin - Acesso completo</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="editUserActive" name="is_active" />
+                <span>Usuário ativo</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="closeEditUserModal()"
+            >
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-primary">
+              💾 Salvar Alterações
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </body>
 </html>

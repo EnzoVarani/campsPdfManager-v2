@@ -192,9 +192,13 @@ async function loadTimelineChart() {
         chartsInstances.timeline = new Chart(ctx.getContext('2d'), {
             type: 'bar',
             data: {
+                // ✅ CORREÇÃO: Parse manual da data (sem timezone)
                 labels: data.data.basic.map(item => {
-                    const date = new Date(item.date);
-                    return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+                    // item.date vem como "2025-11-17"
+                    const parts = item.date.split('-');
+                    const day = parts[2];
+                    const month = parts[1];
+                    return `${day}/${month}`;
                 }),
                 datasets: [{
                     label: 'Documentos Enviados',
@@ -210,7 +214,7 @@ async function loadTimelineChart() {
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false,  // ✅ CRÍTICO!
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
                         display: false
@@ -231,7 +235,17 @@ async function loadTimelineChart() {
                         callbacks: {
                             title: function(context) {
                                 const index = context[0].dataIndex;
-                                const date = new Date(data.data.basic[index].date);
+                                const dateStr = data.data.basic[index].date;
+                                
+                                // ✅ CORREÇÃO: Parse manual da data
+                                const parts = dateStr.split('-');
+                                const year = parseInt(parts[0]);
+                                const month = parseInt(parts[1]) - 1; // JavaScript mês começa em 0
+                                const day = parseInt(parts[2]);
+                                
+                                // Criar data sem conversão de timezone
+                                const date = new Date(year, month, day);
+                                
                                 return date.toLocaleDateString('pt-BR', { 
                                     weekday: 'long', 
                                     day: '2-digit', 
@@ -1313,81 +1327,263 @@ function closeDocumentModal() {
   }
 }
 
-// =============================================================================
-// USERS MANAGEMENT (ADMIN ONLY)
-// =============================================================================
+// ========================================
+// USERS MANAGEMENT - ADMIN ONLY
+// ========================================
 
 async function loadUsers() {
-  if (!auth.isAdmin()) {
-    showToast("Acesso negado", "error");
-    return;
-  }
-
-  try {
-    const response = await auth.fetchWithAuth(`${API_BASE}/auth/users`);
-    const data = await response.json();
-
-    if (response.ok) {
-      renderUsers(data.users);
-    } else {
-      showToast("Erro ao carregar usuários", "error");
+    if (!auth.isAdmin()) {
+        showToast('Acesso negado', 'error');
+        return;
     }
-  } catch (error) {
-    console.error("Load users error:", error);
-    showToast("Erro de conexão", "error");
-  }
+
+    try {
+        const response = await auth.fetchWithAuth(`${API_BASE}/auth/users`);
+        const data = await response.json();
+
+        if (response.ok && data.users) {
+            renderUsers(data.users);
+        } else {
+            showToast('Erro ao carregar usuários', 'error');
+        }
+    } catch (error) {
+        console.error('Load users error:', error);
+        showToast('Erro de conexão', 'error');
+    }
 }
 
 function renderUsers(users) {
-  const tbody = document.getElementById("usersTableBody");
-  if (!tbody) return;
+    const tbody = document.getElementById('usersTableBody');
+    if (!tbody) return;
 
-  if (!users || users.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6">Nenhum usuário encontrado</td></tr>';
-    return;
-  }
+    if (!users || users.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6">Nenhum usuário encontrado</td></tr>`;
+        return;
+    }
 
-  const rows = users
-    .map(
-      (user) => `
+    const currentUserId = auth.getUserInfo()?.id;
+
+    const rows = users.map(user => `
         <tr>
             <td>${user.id}</td>
             <td>${user.name}</td>
             <td>${user.email}</td>
+            <td><span class="badge badge-${user.role}">${user.role.toUpperCase()}</span></td>
             <td>
-                <span class="badge badge-${
-                  user.role
-                }">${user.role.toUpperCase()}</span>
-            </td>
-            <td>
-                <span class="badge ${
-                  user.is_active ? "badge-success" : "badge-danger"
-                }">
-                    ${user.is_active ? "Ativo" : "Inativo"}
+                <span class="badge ${user.is_active ? 'badge-success' : 'badge-danger'}">
+                    ${user.is_active ? 'Ativo' : 'Inativo'}
                 </span>
             </td>
-            <td>
-                <button class="btn-icon" onclick="editUser(${
-                  user.id
-                })" title="Editar">
-                    ✏️
-                </button>
-                ${
-                  user.id !== auth.getUserInfo().id
-                    ? `
-                    <button class="btn-icon btn-danger" onclick="deleteUser(${user.id})" title="Deletar">
-                        🗑️
-                    </button>
-                `
-                    : ""
-                }
+            <td class="actions">
+                <button class="btn-icon" onclick="editUser(${user.id})" title="Editar">✏️</button>
+                ${user.id !== currentUserId ? `
+                    <button class="btn-icon btn-danger" onclick="deleteUser(${user.id})" title="Deletar">🗑️</button>
+                ` : ''}
             </td>
         </tr>
-    `
-    )
-    .join("");
+    `).join('');
 
-  tbody.innerHTML = rows;
+    tbody.innerHTML = rows;
+}
+
+function openCreateUserModal() {
+    const modal = document.getElementById('createUserModal');
+    const form = document.getElementById('createUserForm');
+    
+    if (!modal) {
+        console.error('Modal createUserModal não encontrado');
+        return;
+    }
+
+    if (form) {
+        form.reset();
+    }
+
+    modal.style.display = 'block';
+}
+
+function closeCreateUserModal() {
+    const modal = document.getElementById('createUserModal');
+    const form = document.getElementById('createUserForm');
+    
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    if (form) {
+        form.reset();
+    }
+}
+
+async function createUser(event) {
+    event.preventDefault();
+
+    const userData = {
+        name: document.getElementById('newUserName')?.value,
+        email: document.getElementById('newUserEmail')?.value,
+        password: document.getElementById('newUserPassword')?.value,
+        role: document.getElementById('newUserRole')?.value || 'user',
+        is_active: document.getElementById('newUserActive')?.checked !== false
+    };
+
+    // Validação
+    if (!userData.name || !userData.email || !userData.password) {
+        showToast('Preencha todos os campos obrigatórios', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/auth/users`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${auth.getToken()}`
+            },
+            body: JSON.stringify(userData)
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.user) {
+            showToast('Usuário criado com sucesso!', 'success');
+            closeCreateUserModal();
+            loadUsers(); // Recarregar lista
+        } else {
+            showToast(data.error || 'Erro ao criar usuário', 'error');
+        }
+    } catch (error) {
+        console.error('Create user error:', error);
+        showToast('Erro de conexão', 'error');
+    }
+}
+
+async function editUser(userId) {
+    try {
+        // Buscar dados do usuário
+        const response = await auth.fetchWithAuth(`${API_BASE}/auth/users`);
+        const data = await response.json();
+
+        if (!response.ok || !data.users) {
+            showToast('Erro ao carregar usuário', 'error');
+            return;
+        }
+
+        const user = data.users.find(u => u.id === userId);
+        if (!user) {
+            showToast('Usuário não encontrado', 'error');
+            return;
+        }
+
+        // Abrir modal de edição
+        openEditUserModal(user);
+    } catch (error) {
+        console.error('Edit user error:', error);
+        showToast('Erro de conexão', 'error');
+    }
+}
+
+function openEditUserModal(user) {
+    const modal = document.getElementById('editUserModal');
+    
+    if (!modal) {
+        console.error('Modal editUserModal não encontrado');
+        return;
+    }
+
+    // Preencher campos
+    document.getElementById('editUserId').value = user.id;
+    document.getElementById('editUserName').value = user.name;
+    document.getElementById('editUserEmail').value = user.email;
+    document.getElementById('editUserRole').value = user.role;
+    document.getElementById('editUserActive').checked = user.is_active;
+
+    modal.style.display = 'block';
+}
+
+function closeEditUserModal() {
+    const modal = document.getElementById('editUserModal');
+    const form = document.getElementById('editUserForm');
+    
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    if (form) {
+        form.reset();
+    }
+}
+
+async function updateUser(event) {
+    event.preventDefault();
+
+    const userId = document.getElementById('editUserId')?.value;
+    const userData = {
+        name: document.getElementById('editUserName')?.value,
+        email: document.getElementById('editUserEmail')?.value,
+        role: document.getElementById('editUserRole')?.value,
+        is_active: document.getElementById('editUserActive')?.checked
+    };
+
+    const newPassword = document.getElementById('editUserPassword')?.value;
+    if (newPassword) {
+        userData.password = newPassword;
+    }
+
+    if (!userId || !userData.name || !userData.email) {
+        showToast('Preencha todos os campos obrigatórios', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/auth/users/${userId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${auth.getToken()}`
+            },
+            body: JSON.stringify(userData)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showToast('Usuário atualizado com sucesso!', 'success');
+            closeEditUserModal();
+            loadUsers(); // Recarregar lista
+        } else {
+            showToast(data.error || 'Erro ao atualizar usuário', 'error');
+        }
+    } catch (error) {
+        console.error('Update user error:', error);
+        showToast('Erro de conexão', 'error');
+    }
+}
+
+async function deleteUser(userId) {
+    if (!confirm('Tem certeza que deseja deletar este usuário?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/auth/users/${userId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${auth.getToken()}`
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showToast('Usuário deletado com sucesso!', 'success');
+            loadUsers(); // Recarregar lista
+        } else {
+            showToast(data.error || 'Erro ao deletar usuário', 'error');
+        }
+    } catch (error) {
+        console.error('Delete user error:', error);
+        showToast('Erro de conexão', 'error');
+    }
 }
 
 // =============================================================================
@@ -1439,3 +1635,11 @@ window.downloadDocument = downloadDocument;
 window.deleteDocument = deleteDocument;
 window.closeBatchModal = closeBatchModal;
 window.closeDocumentModal = closeDocumentModal;
+window.loadUsers = loadUsers;
+window.openCreateUserModal = openCreateUserModal;
+window.closeCreateUserModal = closeCreateUserModal;
+window.createUser = createUser;
+window.editUser = editUser;
+window.closeEditUserModal = closeEditUserModal;
+window.updateUser = updateUser;
+window.deleteUser = deleteUser;

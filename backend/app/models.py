@@ -3,9 +3,13 @@ Modelos do banco de dados (User, Document, AuditLog)
 """
 
 from datetime import datetime
+import pytz
 from enum import Enum
 from flask_jwt_extended import create_access_token, create_refresh_token
 from app.extensions import db, bcrypt
+
+# ✅ Timezone do Brasil
+BR_TZ = pytz.timezone('America/Sao_Paulo')
 
 
 class UserRole(Enum):
@@ -23,11 +27,11 @@ class User(db.Model):
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.Enum(UserRole), nullable=False, default=UserRole.USER)
     is_active = db.Column(db.Boolean, default=True)
-    
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(BR_TZ))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(BR_TZ), onupdate=lambda: datetime.now(BR_TZ))
     last_login = db.Column(db.DateTime)
     
+    # Relationships
     documents = db.relationship('Document', back_populates='uploader', lazy='dynamic')
     audit_logs = db.relationship('AuditLog', back_populates='user', lazy='dynamic')
     
@@ -45,20 +49,21 @@ class User(db.Model):
         
         return {
             'access_token': create_access_token(
-                identity=str(self.id),  # ✅ CONVERTER PARA STRING
+                identity=str(self.id),
                 additional_claims=claims
             ),
             'refresh_token': create_refresh_token(
-                identity=str(self.id)  # ✅ CONVERTER PARA STRING
+                identity=str(self.id)
             )
         }
-
+    
     def has_permission(self, permission: str) -> bool:
         permissions = {
             UserRole.ADMIN: ['create', 'read', 'update', 'delete', 'manage_users'],
             UserRole.USER: ['create', 'read', 'update'],
             UserRole.VIEWER: ['read']
         }
+        
         return permission in permissions.get(self.role, [])
     
     def to_dict(self):
@@ -77,38 +82,52 @@ class Document(db.Model):
     __tablename__ = 'documents'
     
     id = db.Column(db.Integer, primary_key=True)
-    filename = db.Column(db.String(255), nullable=False)
+    filename = db.Column(db.String(255), unique=True, nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
     file_path = db.Column(db.String(500), nullable=False)
-    file_size = db.Column(db.Integer, nullable=False)
-    file_hash = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    file_size = db.Column(db.Integer)
+    file_hash = db.Column(db.String(64), unique=True)
     
+    # Metadados
     title = db.Column(db.String(255))
     author = db.Column(db.String(255))
-    subject = db.Column(db.String(500))
-    doc_type = db.Column(db.String(100))
+    subject = db.Column(db.String(255))
+    doc_type = db.Column(db.String(50))
     keywords = db.Column(db.String(500))
     
+    # Assinatura
     is_signed = db.Column(db.Boolean, default=False)
     signed_at = db.Column(db.DateTime)
     
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # ✅ CORREÇÃO: Usar timezone do Brasil
+    uploaded_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=lambda: datetime.now(BR_TZ)
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(BR_TZ),
+        onupdate=lambda: datetime.now(BR_TZ)
+    )
     
-    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    
+    # ✅ CORREÇÃO: lazy='dynamic' para permitir .order_by()
     uploader = db.relationship('User', back_populates='documents')
-    
-    # ✅ CORREÇÃO: Mudar lazy=True para lazy='dynamic'
-    audit_logs = db.relationship('AuditLog', 
-                                  back_populates='document', 
-                                  lazy='dynamic',  # ✅ MUDOU AQUI
-                                  cascade='all, delete-orphan')
+    audit_logs = db.relationship(
+        'AuditLog', 
+        back_populates='document', 
+        lazy='dynamic',  # ✅ MUDOU de True para 'dynamic'
+        cascade='all, delete-orphan'
+    )
     
     def to_dict(self):
         return {
             'id': self.id,
             'filename': self.filename,
             'original_filename': self.original_filename,
+            'file_path': self.file_path,
             'file_size': self.file_size,
             'file_hash': self.file_hash,
             'title': self.title,
@@ -118,8 +137,8 @@ class Document(db.Model):
             'keywords': self.keywords,
             'is_signed': self.is_signed,
             'signed_at': self.signed_at.isoformat() if self.signed_at else None,
-            'uploaded_at': self.uploaded_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
+            'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'uploaded_by': self.uploaded_by
         }
 
@@ -128,25 +147,32 @@ class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
     
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    action = db.Column(db.String(100), nullable=False)
+    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    action = db.Column(db.String(50), nullable=False)
     description = db.Column(db.Text)
     ip_address = db.Column(db.String(50))
     user_agent = db.Column(db.String(500))
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     
+    # ✅ CORREÇÃO: Timestamp com timezone
+    timestamp = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=lambda: datetime.now(BR_TZ)
+    )
+    
+    # Relationships
     document = db.relationship('Document', back_populates='audit_logs')
     user = db.relationship('User', back_populates='audit_logs')
     
     def to_dict(self):
         return {
             'id': self.id,
+            'document_id': self.document_id,
+            'user_id': self.user_id,
             'action': self.action,
             'description': self.description,
-            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'ip_address': self.ip_address,
             'user_agent': self.user_agent,
-            'document_id': self.document_id,
-            'user_id': self.user_id
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None
         }
