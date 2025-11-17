@@ -850,7 +850,7 @@ function openBatchMetadataModal() {
 
   if (modal && count) {
     count.textContent = selectedDocuments.size;
-    modal.style.display = "block";
+    modal.style.display = "flex";
   }
 }
 
@@ -1314,7 +1314,7 @@ function showDocumentModal(doc) {
     `;
 
   content.innerHTML = modalHTML;
-  modal.style.display = "block";
+  modal.style.display = "flex";
 
   console.log("✅ Modal exibido com sucesso");
 }
@@ -1399,7 +1399,7 @@ function openCreateUserModal() {
         form.reset();
     }
 
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
 }
 
 function closeCreateUserModal() {
@@ -1497,7 +1497,7 @@ function openEditUserModal(user) {
     document.getElementById('editUserRole').value = user.role;
     document.getElementById('editUserActive').checked = user.is_active;
 
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
 }
 
 function closeEditUserModal() {
