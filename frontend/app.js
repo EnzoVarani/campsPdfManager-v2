@@ -12,6 +12,47 @@ let chartsInstances = {};
 let selectedDocuments = new Set(); // IDs dos documentos selecionados
 let selectedFiles = []; // Arquivos para upload
 
+
+// =============================================================================
+// FUNÇÕES AUXILIARES - HISTÓRICO DE AUDITORIA
+// =============================================================================
+
+/**
+ * Traduz ações de auditoria para português com formatação adequada
+ */
+function formatAuditAction(action) {
+    const actions = {
+        'upload': 'Upload',
+        'metadata_batch_update': 'Atualização em Lote',
+        'metadata_update': 'Atualização de Metadados',
+        'download': 'Download',
+        'delete': 'Exclusão',
+        'sign': 'Assinatura Digital',
+        'view': 'Visualização',
+        'edit': 'Edição'
+    };
+
+    return actions[action] || action.charAt(0).toUpperCase() + action.slice(1).replace(/_/g, ' ');
+}
+
+/**
+ * Retorna ícone emoji e cor para cada tipo de ação
+ */
+function getAuditIconAndColor(action) {
+    const types = {
+        'upload': { icon: '📤', color: 'blue' },
+        'metadata_batch_update': { icon: '📝', color: 'purple' },
+        'metadata_update': { icon: '✏️', color: 'orange' },
+        'download': { icon: '📥', color: 'green' },
+        'delete': { icon: '🗑️', color: 'red' },
+        'sign': { icon: '✍️', color: 'teal' },
+        'view': { icon: '👁️', color: 'gray' },
+        'edit': { icon: '📋', color: 'yellow' }
+    };
+
+    return types[action] || { icon: '🔔', color: 'gray' };
+}
+
 // =============================================================================
 // INICIALIZAÇÃO
 // =============================================================================
@@ -1270,28 +1311,67 @@ function showDocumentModal(doc) {
           doc.audit_logs && doc.audit_logs.length > 0
             ? `
             <div class="audit-logs-section">
-                <h3>📋 Histórico de Auditoria</h3>
-                <div class="audit-logs-list">
+                <div class="audit-header">
+                    <h3>
+                        <span class="audit-icon">📋</span>
+                        Histórico de Auditoria
+                    </h3>
+                    <span class="audit-count">${doc.audit_logs.length} ${doc.audit_logs.length === 1 ? 'evento' : 'eventos'}</span>
+                </div>
+                <div class="audit-timeline">
                     ${doc.audit_logs
-                      .map(
-                        (log) => `
-                        <div class="audit-log-item">
-                            <div class="log-icon">🔔</div>
-                            <div class="log-info">
-                                <strong>${log.action}</strong>
-                                <p>${log.description || "-"}</p>
-                                <small>${formatDate(log.timestamp)}${
-                          log.ip_address ? ` • IP: ${log.ip_address}` : ""
-                        }</small>
+                      .map((log, index) => {
+                        const { icon, color } = getAuditIconAndColor(log.action);
+                        const actionName = formatAuditAction(log.action);
+                        const isFirst = index === 0;
+                        const isLast = index === doc.audit_logs.length - 1;
+
+                        return `
+                        <div class="audit-item ${isFirst ? 'first' : ''} ${isLast ? 'last' : ''}">
+                            <div class="audit-connector"></div>
+                            <div class="audit-icon-badge ${color}">
+                                <span>${icon}</span>
+                            </div>
+                            <div class="audit-content">
+                                <div class="audit-content-header">
+                                    <strong class="audit-action">${actionName}</strong>
+                                    <span class="audit-timestamp">${formatDate(log.timestamp)}</span>
+                                </div>
+                                ${log.description ? `
+                                    <p class="audit-description">${log.description}</p>
+                                ` : ''}
+                                <div class="audit-meta">
+                                    ${log.user_id ? `<span class="audit-meta-item">
+                                        <span class="meta-icon">👤</span>
+                                        <span>User ID: ${log.user_id}</span>
+                                    </span>` : ''}
+                                    ${log.ip_address ? `<span class="audit-meta-item">
+                                        <span class="meta-icon">🌐</span>
+                                        <span>IP: ${log.ip_address}</span>
+                                    </span>` : ''}
+                                </div>
                             </div>
                         </div>
-                    `
-                      )
+                        `;
+                      })
                       .join("")}
                 </div>
             </div>
         `
-            : ""
+            : `
+            <div class="audit-logs-section">
+                <div class="audit-header">
+                    <h3>
+                        <span class="audit-icon">📋</span>
+                        Histórico de Auditoria
+                    </h3>
+                </div>
+                <div class="audit-empty">
+                    <div class="empty-icon">📭</div>
+                    <p>Nenhum evento de auditoria registrado</p>
+                </div>
+            </div>
+        `
         }
         
         <div class="modal-actions">

@@ -1,5 +1,11 @@
 """
 Modelos do banco de dados (User, Document, AuditLog)
+CAMPS PDF Manager v2.0 - Conformidade Legal Total
+
+Conformidade:
+- Decreto 10.278/2020 (Metadados obrigatórios)
+- Lei 14.063/2020 (Assinatura digital)
+- MP 2.200-2/2001 (ICP-Brasil)
 """
 
 from datetime import datetime
@@ -26,6 +32,10 @@ class User(db.Model):
     name = db.Column(db.String(100), nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.Enum(UserRole), nullable=False, default=UserRole.USER)
+    
+    # ✅ NOVO: CPF/CNPJ do usuário (para digitizer_cpf_cnpj)
+    cpf_cnpj = db.Column(db.String(18))  # 11 dígitos CPF ou 14 CNPJ
+    
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(BR_TZ))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(BR_TZ), onupdate=lambda: datetime.now(BR_TZ))
@@ -71,6 +81,7 @@ class User(db.Model):
             'id': self.id,
             'email': self.email,
             'name': self.name,
+            'cpf_cnpj': self.cpf_cnpj,  # ✅ NOVO
             'role': self.role.value,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -79,32 +90,81 @@ class User(db.Model):
 
 
 class Document(db.Model):
+    """
+    Modelo para documentos digitalizados com validade legal
+    Conformidade: Decreto 10.278/2020 + Lei 14.063/2020
+    """
     __tablename__ = 'documents'
     
+    # ==========================================
+    # IDENTIFICAÇÃO BÁSICA
+    # ==========================================
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), unique=True, nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
     file_path = db.Column(db.String(500), nullable=False)
     file_size = db.Column(db.Integer)
+    
+    # ==========================================
+    # METADADOS OBRIGATÓRIOS (Decreto 10.278/2020)
+    # ==========================================
+    
+    # ✅ NOVO: Responsável pela digitalização (OBRIGATÓRIO)
+    digitizer_name = db.Column(db.String(200), nullable=False)
+    
+    # ✅ NOVO: CPF/CNPJ do responsável (OBRIGATÓRIO)
+    digitizer_cpf_cnpj = db.Column(db.String(18), nullable=False)
+    
+    # ✅ NOVO: Resolução da digitalização (OBRIGATÓRIO)
+    resolution_dpi = db.Column(db.Integer, default=300)
+    
+    # ✅ NOVO: Equipamento utilizado (RECOMENDADO)
+    equipment_info = db.Column(db.String(200))
+    
+    # Integridade (SHA-256 - OBRIGATÓRIO)
     file_hash = db.Column(db.String(64), unique=True)
     
-    # Metadados
+    # ==========================================
+    # METADADOS DESCRITIVOS (Recomendados)
+    # ==========================================
     title = db.Column(db.String(255))
     author = db.Column(db.String(255))
     subject = db.Column(db.String(255))
     doc_type = db.Column(db.String(50))
-    keywords = db.Column(db.String(500))
     
-    # Assinatura
+    # ❌ REMOVIDO: keywords (não é obrigatório)
+    # keywords = db.Column(db.String(500))  # REMOVIDO
+    
+    # ✅ NOVO: Dados da organização
+    company_name = db.Column(db.String(200))  # Ex: "CAMPS Santos"
+    company_cnpj = db.Column(db.String(18))   # CNPJ da organização
+    
+    # ✅ NOVO: Tipo e categoria do documento
+    document_type = db.Column(db.String(100))      # Ex: "Contrato de Aprendizagem"
+    document_category = db.Column(db.String(100))  # Ex: "Trabalhista"
+    
+    # ==========================================
+    # ASSINATURA DIGITAL (DocuSign - FASE 2)
+    # ==========================================
     is_signed = db.Column(db.Boolean, default=False)
     signed_at = db.Column(db.DateTime)
     
-    # ✅ CORREÇÃO: Usar timezone do Brasil
+    # ✅ NOVO: Campos DocuSign (preparação FASE 2)
+    docusign_envelope_id = db.Column(db.String(100), unique=True)
+    docusign_status = db.Column(db.String(50))  # sent, delivered, signed, completed
+    docusign_sent_date = db.Column(db.DateTime)
+    docusign_signed_date = db.Column(db.DateTime)
+    signed_document_url = db.Column(db.String(500))
+    
+    # ==========================================
+    # TIMESTAMPS E AUDITORIA
+    # ==========================================
     uploaded_at = db.Column(
         db.DateTime,
         nullable=False,
         default=lambda: datetime.now(BR_TZ)
     )
+    
     updated_at = db.Column(
         db.DateTime,
         default=lambda: datetime.now(BR_TZ),
@@ -113,16 +173,19 @@ class Document(db.Model):
     
     uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     
-    # ✅ CORREÇÃO: lazy='dynamic' para permitir .order_by()
+    # ==========================================
+    # RELACIONAMENTOS
+    # ==========================================
     uploader = db.relationship('User', back_populates='documents')
     audit_logs = db.relationship(
-        'AuditLog', 
-        back_populates='document', 
-        lazy='dynamic',  # ✅ MUDOU de True para 'dynamic'
+        'AuditLog',
+        back_populates='document',
+        lazy='dynamic',
         cascade='all, delete-orphan'
     )
     
     def to_dict(self):
+        """Serializa documento para JSON"""
         return {
             'id': self.id,
             'filename': self.filename,
@@ -130,13 +193,39 @@ class Document(db.Model):
             'file_path': self.file_path,
             'file_size': self.file_size,
             'file_hash': self.file_hash,
+            
+            # Metadados descritivos
             'title': self.title,
             'author': self.author,
             'subject': self.subject,
             'doc_type': self.doc_type,
-            'keywords': self.keywords,
+            
+            # ✅ NOVOS: Metadados obrigatórios
+            'digitizer_name': self.digitizer_name,
+            'digitizer_cpf_cnpj': self.digitizer_cpf_cnpj,
+            'resolution_dpi': self.resolution_dpi,
+            'equipment_info': self.equipment_info,
+            
+            # ✅ NOVOS: Organização
+            'company_name': self.company_name,
+            'company_cnpj': self.company_cnpj,
+            
+            # ✅ NOVOS: Tipo e categoria
+            'document_type': self.document_type,
+            'document_category': self.document_category,
+            
+            # Assinatura
             'is_signed': self.is_signed,
             'signed_at': self.signed_at.isoformat() if self.signed_at else None,
+            
+            # ✅ NOVOS: DocuSign
+            'docusign_envelope_id': self.docusign_envelope_id,
+            'docusign_status': self.docusign_status,
+            'docusign_sent_date': self.docusign_sent_date.isoformat() if self.docusign_sent_date else None,
+            'docusign_signed_date': self.docusign_signed_date.isoformat() if self.docusign_signed_date else None,
+            'signed_document_url': self.signed_document_url,
+            
+            # Timestamps
             'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'uploaded_by': self.uploaded_by
@@ -144,6 +233,7 @@ class Document(db.Model):
 
 
 class AuditLog(db.Model):
+    """Log de auditoria para rastreabilidade total"""
     __tablename__ = 'audit_logs'
     
     id = db.Column(db.Integer, primary_key=True)

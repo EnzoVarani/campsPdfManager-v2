@@ -1280,6 +1280,24 @@ select.form-control {
   border: 1px solid var(--color-border);
 }
 
+/* FIX: Garantir backgrounds dos badges no modal de documentos */
+#documentModal .badge {
+    background: transparent; /* Reset para garantir que classes específicas funcionem */
+}
+
+#documentModal .badge-secondary {
+    background: var(--color-secondary) !important;
+    color: var(--color-text-secondary) !important;
+    border: 1px solid var(--color-border) !important;
+}
+
+#documentModal .badge-success {
+    background: rgba(var(--color-success-rgb), var(--status-bg-opacity)) !important;
+    color: var(--color-success) !important;
+    border: 1px solid rgba(var(--color-success-rgb), var(--status-border-opacity)) !important;
+}
+
+
 /* Audit Logs */
 .audit-logs-container {
   display: flex;
