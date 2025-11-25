@@ -26,6 +26,105 @@ BR_TZ = pytz.timezone('America/Sao_Paulo')
 documents_bp = Blueprint('documents', __name__)
 
 
+# ========================================
+# 🔍 FUNÇÕES DE VALIDAÇÃO - FASE 1
+# ========================================
+
+def validate_cpf_cnpj(cpf_cnpj: str) -> tuple[bool, str]:
+    """
+    Valida CPF (11 dígitos) ou CNPJ (14 dígitos)
+    
+    Args:
+        cpf_cnpj: String com CPF/CNPJ (pode ter formatação)
+    
+    Returns:
+        tuple: (is_valid: bool, message: str)
+    
+    Exemplos:
+        validate_cpf_cnpj("123.456.789-00") -> (True, "CPF válido")
+        validate_cpf_cnpj("12.345.678/0001-90") -> (True, "CNPJ válido")
+        validate_cpf_cnpj("123") -> (False, "CPF deve ter 11 dígitos...")
+    """
+    if not cpf_cnpj:
+        return False, "CPF/CNPJ é obrigatório"
+    
+    # Remover caracteres não numéricos
+    import re
+    numbers = re.sub(r'\D', '', cpf_cnpj)
+    
+    # Verificar tamanho
+    if len(numbers) == 11:
+        return True, "CPF válido"
+    elif len(numbers) == 14:
+        return True, "CNPJ válido"
+    else:
+        return False, "CPF deve ter 11 dígitos ou CNPJ deve ter 14 dígitos"
+
+
+def validate_resolution_dpi(dpi) -> tuple[bool, str]:
+    """
+    Valida resolução DPI para digitalização
+    
+    Args:
+        dpi: Integer ou string representando DPI
+    
+    Returns:
+        tuple: (is_valid: bool, message: str)
+    
+    Regras:
+        - Mínimo legal: 150 DPI
+        - Recomendado: 300 DPI
+        - Ideal: 600 DPI (documentos críticos)
+    
+    Exemplos:
+        validate_resolution_dpi(300) -> (True, "Resolução válida: 300 DPI")
+        validate_resolution_dpi(100) -> (False, "Resolução mínima: 150 DPI...")
+        validate_resolution_dpi("abc") -> (False, "DPI deve ser um número...")
+    """
+    if not dpi:
+        return False, "Resolução DPI é obrigatória"
+    
+    try:
+        dpi_int = int(dpi)
+        if dpi_int < 150:
+            return False, "Resolução mínima: 150 DPI (recomendado: 300 DPI)"
+        return True, f"Resolução válida: {dpi_int} DPI"
+    except (ValueError, TypeError):
+        return False, "DPI deve ser um número inteiro"
+
+
+def get_user_data(user_id: int) -> dict:
+    """
+    Obtém dados do usuário para auto-preenchimento de campos
+    
+    Args:
+        user_id: ID do usuário no banco
+    
+    Returns:
+        dict: {'name': str, 'cpf_cnpj': str | None}
+    
+    Uso:
+        Preencher automaticamente digitizer_name e digitizer_cpf_cnpj
+        durante upload de documentos
+    
+    Exemplo:
+        user_data = get_user_data(1)
+        # {'name': 'João Silva', 'cpf_cnpj': '12345678900'}
+    """
+    from app.models import User
+    user = User.query.get(user_id)
+    if user:
+        return {
+            'name': user.name,
+            'cpf_cnpj': user.cpf_cnpj or None
+        }
+    return {'name': None, 'cpf_cnpj': None}
+
+
+# ========================================
+# 🔥 ROTAS DE DOCUMENTOS
+# ========================================
+
 @documents_bp.errorhandler(RequestEntityTooLarge)
 def handle_file_too_large(e):
     max_size_mb = current_app.config.get('MAX_FILE_SIZE_MB', 50)
@@ -51,6 +150,29 @@ def upload_documents():
     """Upload de múltiplos PDFs com autenticação"""
     current_user_id = get_jwt_identity()
     user_id_int = int(current_user_id)
+    
+    # ✅ FASE 1: Obter dados do usuário para auto-preenchimento
+    user_data = get_user_data(user_id_int)
+    
+    # ✅ FASE 1: Receber novos campos do formulário
+    digitizer_name = request.form.get('digitizer_name', user_data['name'] or 'Digitalizador Padrão')
+    digitizer_cpf_cnpj = request.form.get('digitizer_cpf_cnpj', user_data['cpf_cnpj'] or '00000000000000')
+    resolution_dpi = int(request.form.get('resolution_dpi', 300))
+    equipment_info = request.form.get('equipment_info', 'Scanner Digital')
+    company_name = request.form.get('company_name', 'CAMPS Santos')
+    company_cnpj = request.form.get('company_cnpj', '')
+    document_type = request.form.get('document_type', 'Contrato de Aprendizagem')
+    document_category = request.form.get('document_category', 'Trabalhista')
+    
+    # ✅ FASE 1: Validar CPF/CNPJ
+    is_valid_cpf, cpf_message = validate_cpf_cnpj(digitizer_cpf_cnpj)
+    if not is_valid_cpf:
+        return jsonify({'success': False, 'message': f'CPF/CNPJ inválido: {cpf_message}'}), 400
+    
+    # ✅ FASE 1: Validar DPI
+    is_valid_dpi, dpi_message = validate_resolution_dpi(resolution_dpi)
+    if not is_valid_dpi:
+        return jsonify({'success': False, 'message': f'DPI inválido: {dpi_message}'}), 400
     
     # Obter arquivos do request
     files = []
@@ -140,7 +262,7 @@ def upload_documents():
             clean_filename = filename.replace('.pdf', '').replace('.PDF', '')
             auto_title = f"Prontuário de {clean_filename}"
             
-            # ✅ CORREÇÃO: Criar documento com timezone correto
+            # ✅ CORREÇÃO: Criar documento com timezone correto e campos FASE 1
             document = Document(
                 filename=unique_filename,
                 original_filename=filename,
@@ -150,7 +272,18 @@ def upload_documents():
                 title=auto_title,
                 uploaded_by=user_id_int,
                 uploaded_at=now_br,
-                updated_at=now_br
+                updated_at=now_br,
+                # ✅ FASE 1: Metadados obrigatórios (Decreto 10.278/2020)
+                digitizer_name=digitizer_name,
+                digitizer_cpf_cnpj=digitizer_cpf_cnpj,
+                resolution_dpi=resolution_dpi,
+                equipment_info=equipment_info,
+                # ✅ FASE 1: Organização
+                company_name=company_name,
+                company_cnpj=company_cnpj,
+                # ✅ FASE 1: Classificação
+                document_type=document_type,
+                document_category=document_category
             )
             
             db.session.add(document)
@@ -178,7 +311,11 @@ def upload_documents():
                 'hash': file_hash,
                 'size': file_size,
                 'pages': page_count,
-                'uploaded_at': now_br.isoformat()
+                'uploaded_at': now_br.isoformat(),
+                # ✅ FASE 1: Incluir novos campos na resposta
+                'digitizer_name': digitizer_name,
+                'resolution_dpi': resolution_dpi,
+                'document_type': document_type
             })
             
         except Exception as e:
