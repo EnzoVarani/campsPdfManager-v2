@@ -351,13 +351,24 @@ def list_documents():
             db.or_(
                 Document.title.ilike(f'%{search}%'),
                 Document.author.ilike(f'%{search}%'),
-                Document.original_filename.ilike(f'%{search}%')
+                Document.original_filename.ilike(f'%{search}%'),
+                Document.digitizer_name.ilike(f'%{search}%')  # ✅ FASE 1: Buscar por digitalizador
             )
         )
     
     doc_type = request.args.get('doc_type')
     if doc_type:
         query = query.filter(Document.doc_type == doc_type.lower())
+    
+    # ✅ FASE 1: Filtro por document_type
+    document_type = request.args.get('document_type')
+    if document_type:
+        query = query.filter(Document.document_type == document_type)
+    
+    # ✅ FASE 1: Filtro por document_category
+    document_category = request.args.get('document_category')
+    if document_category:
+        query = query.filter(Document.document_category == document_category)
     
     # Paginação
     page = request.args.get('page', 1, type=int)
@@ -423,8 +434,37 @@ def add_metadata(doc_id):
             document.author = data['author']
         if 'doc_type' in data:
             document.doc_type = data['doc_type'].lower() if data['doc_type'] else None
-        if 'keywords' in data:
-            document.keywords = data['keywords']
+        
+        # ✅ FASE 1: Processar novos campos obrigatórios
+        if 'digitizer_name' in data:
+            document.digitizer_name = data['digitizer_name']
+        
+        if 'digitizer_cpf_cnpj' in data:
+            is_valid, message = validate_cpf_cnpj(data['digitizer_cpf_cnpj'])
+            if not is_valid:
+                return jsonify({'success': False, 'message': message}), 400
+            document.digitizer_cpf_cnpj = data['digitizer_cpf_cnpj']
+        
+        if 'resolution_dpi' in data:
+            is_valid, message = validate_resolution_dpi(data['resolution_dpi'])
+            if not is_valid:
+                return jsonify({'success': False, 'message': message}), 400
+            document.resolution_dpi = int(data['resolution_dpi'])
+        
+        if 'equipment_info' in data:
+            document.equipment_info = data['equipment_info']
+        
+        if 'company_name' in data:
+            document.company_name = data['company_name']
+        
+        if 'company_cnpj' in data:
+            document.company_cnpj = data['company_cnpj']
+        
+        if 'document_type' in data:
+            document.document_type = data['document_type']
+        
+        if 'document_category' in data:
+            document.document_category = data['document_category']
         
         document.updated_at = now_br
         db.session.commit()
@@ -648,6 +688,18 @@ def batch_add_metadata():
     # Normalizar doc_type
     if 'doc_type' in metadata and metadata['doc_type']:
         metadata['doc_type'] = metadata['doc_type'].lower()
+    
+    # ✅ FASE 1: Validar digitizer_cpf_cnpj
+    if 'digitizer_cpf_cnpj' in metadata:
+        is_valid, message = validate_cpf_cnpj(metadata['digitizer_cpf_cnpj'])
+        if not is_valid:
+            return jsonify({'success': False, 'message': message}), 400
+    
+    # ✅ FASE 1: Validar resolution_dpi
+    if 'resolution_dpi' in metadata:
+        is_valid, message = validate_resolution_dpi(metadata['resolution_dpi'])
+        if not is_valid:
+            return jsonify({'success': False, 'message': message}), 400
     
     # Validar metadados
     validator = MetadataValidator()

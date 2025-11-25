@@ -108,7 +108,7 @@ class PDFService:
                     '/Author': metadata.get('author', ''),
                     '/Subject': metadata.get('subject', ''),
                     '/Creator': 'CAMPS PDF Manager v2.0',
-                    '/Producer': f"CAMPS Santos - {metadata.get('digitalization_location', '')}",
+                    '/Producer': f"CAMPS Santos - {metadata.get('company_name', 'CAMPS Santos')}",
                     '/CreationDate': datetime.utcnow().strftime('D:%Y%m%d%H%M%S'),
                     '/ModDate': datetime.utcnow().strftime('D:%Y%m%d%H%M%S'),
                     '/Custom': f"ID:{metadata.get('identifier', '')};Hash:{metadata.get('hash_sha256', '')[:16]}"

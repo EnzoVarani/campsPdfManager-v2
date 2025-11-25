@@ -138,7 +138,6 @@ class BatchProcessor:
                     'title': document.title,
                     'author': document.author,
                     'subject': document.subject,
-                    'keywords': document.keywords,
                     'doc_type': document.doc_type
                 }
                 
@@ -152,12 +151,34 @@ class BatchProcessor:
                 if 'subject' in metadata and metadata['subject']:
                     document.subject = metadata['subject']
                 
-                if 'keywords' in metadata and metadata['keywords']:
-                    document.keywords = metadata['keywords']
-                
                 if 'doc_type' in metadata and metadata['doc_type']:
                     # ✅ Normalizar para minúsculo
                     document.doc_type = metadata['doc_type'].lower()
+                
+                # ✅ FASE 1: Processar novos campos obrigatórios
+                if 'digitizer_name' in metadata:
+                    document.digitizer_name = metadata['digitizer_name']
+                
+                if 'digitizer_cpf_cnpj' in metadata:
+                    document.digitizer_cpf_cnpj = metadata['digitizer_cpf_cnpj']
+                
+                if 'resolution_dpi' in metadata:
+                    document.resolution_dpi = int(metadata['resolution_dpi'])
+                
+                if 'equipment_info' in metadata:
+                    document.equipment_info = metadata['equipment_info']
+                
+                if 'company_name' in metadata:
+                    document.company_name = metadata['company_name']
+                
+                if 'company_cnpj' in metadata:
+                    document.company_cnpj = metadata['company_cnpj']
+                
+                if 'document_type' in metadata:
+                    document.document_type = metadata['document_type']
+                
+                if 'document_category' in metadata:
+                    document.document_category = metadata['document_category']
                 
                 document.updated_at = datetime.utcnow()
                 
@@ -168,7 +189,11 @@ class BatchProcessor:
                 
                 # ✅ CORREÇÃO: Log de auditoria SEM metadata_changes
                 changes = []
-                for key in ['title', 'author', 'subject', 'doc_type', 'keywords']:
+                # ✅ FASE 1: Listar todos os campos possíveis (sem keywords)
+                all_fields = ['title', 'author', 'subject', 'doc_type', 'digitizer_name', 
+                              'digitizer_cpf_cnpj', 'resolution_dpi', 'equipment_info',
+                              'company_name', 'company_cnpj', 'document_type', 'document_category']
+                for key in all_fields:
                     if key in metadata and metadata[key]:
                         changes.append(f"{key}: '{metadata[key]}'")
                 

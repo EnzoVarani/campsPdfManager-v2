@@ -28,7 +28,6 @@ class MetadataValidator:
     MAX_TITLE_LENGTH = 500
     MAX_AUTHOR_LENGTH = 200
     MAX_SUBJECT_LENGTH = 1000
-    MAX_KEYWORDS_LENGTH = 500
     
     def validate_metadata(self, metadata: Dict, document: Optional[object] = None) -> Dict:
         """
@@ -81,23 +80,17 @@ class MetadataValidator:
             if len(subject) > self.MAX_SUBJECT_LENGTH:
                 errors.append(f"Assunto excede {self.MAX_SUBJECT_LENGTH} caracteres")
         
-        # 6. Validar palavras-chave
-        if metadata.get('keywords'):
-            keywords = metadata['keywords'].strip()
-            if len(keywords) > self.MAX_KEYWORDS_LENGTH:
-                errors.append(f"Palavras-chave excedem {self.MAX_KEYWORDS_LENGTH} caracteres")
-        
-        # 7. Validar CPF (se fornecido)
+        # 6. Validar CPF (se fornecido)
         if metadata.get('cpf'):
             if not self._validate_cpf(metadata['cpf']):
                 errors.append("CPF inválido")
         
-        # 8. Validar CNPJ (se fornecido)
+        # 7. Validar CNPJ (se fornecido)
         if metadata.get('cnpj'):
             if not self._validate_cnpj(metadata['cnpj']):
                 errors.append("CNPJ inválido")
         
-        # 9. Verificar integridade do documento
+        # 8. Verificar integridade do documento
         if document and not getattr(document, 'hash_sha256', None):
             errors.append("Documento sem hash de integridade")
         
