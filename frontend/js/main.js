@@ -29,14 +29,26 @@ class App {
     async init() {
         console.log('🚀 CAMPS PDF Manager v2.0 - Initializing...');
 
-        // Initialize auth from global (defined in auth.js)
-        this.auth = window.auth;
+        // Initialize auth
+        this.auth = new AuthManager();
+        window.auth = this.auth; // For backward compatibility if needed
+
+        // Setup login form listener
+        this.setupLoginForm();
+        this.setupLogout();
         
         if (!this.auth.isAuthenticated()) {
             this.showLoginModal();
             return;
         }
 
+        await this.startApp();
+    }
+
+    /**
+     * Start the main application after auth
+     */
+    async startApp() {
         // Initialize API client
         this.api = new ApiClient(this.auth);
 
@@ -52,10 +64,66 @@ class App {
         // Update user info display
         this.updateUserInfo();
 
+        // Show app container
+        document.getElementById('loadingScreen').style.display = 'none';
+        document.getElementById('loginModal').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+
         // Load initial section
         await this.loadSection('dashboard');
 
         console.log('✅ Application initialized successfully');
+    }
+
+    /**
+     * Setup login form
+     */
+    setupLoginForm() {
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+                const errorDiv = document.getElementById('loginError');
+                const submitBtn = loginForm.querySelector('button[type="submit"]');
+
+                if (!email || !password) {
+                    errorDiv.textContent = 'Email e senha são obrigatórios';
+                    return;
+                }
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Entrando...';
+                errorDiv.textContent = '';
+
+                const result = await this.auth.login(email, password);
+
+                if (result.success) {
+                    showToast(`Bem-vindo, ${result.user.name}!`, 'success');
+                    await this.startApp();
+                } else {
+                    errorDiv.textContent = result.message;
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Entrar';
+                }
+            });
+        }
+    }
+
+    /**
+     * Setup logout
+     */
+    setupLogout() {
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                if (confirm('Deseja realmente sair?')) {
+                    this.auth.logout();
+                }
+            });
+        }
     }
 
     /**
@@ -212,6 +280,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.app = new App();
     await window.app.init();
 });
+
+// ✅ Global helpers for HTML onclick events
+window.closeDocumentModal = () => {
+    document.getElementById('documentModal').style.display = 'none';
+};
+
+window.closeBatchModal = () => {
+    document.getElementById('batchMetadataModal').style.display = 'none';
+};
+
+window.closeCreateUserModal = () => {
+    document.getElementById('createUserModal').style.display = 'none';
+};
+
+window.closeEditUserModal = () => {
+    document.getElementById('editUserModal').style.display = 'none';
+};
+
+window.openCreateUserModal = () => {
+    if (window.app && window.app.modules.users) {
+        window.app.modules.users.openCreateModal();
+    }
+};
+
+window.toggleSelectAll = () => {
+    if (window.app && window.app.modules.batch) {
+        window.app.modules.batch.toggleSelectAll();
+    }
+};
+
+window.sortDocuments = (field) => {
+    if (window.app && window.app.modules.documents) {
+        window.app.modules.documents.sort(field);
+    }
+};
+
+window.loadDocuments = (page) => {
+    if (window.app && window.app.modules.documents) {
+        window.app.modules.documents.load(page);
+    }
+};
+
+window.clearSelection = () => {
+    if (window.app && window.app.modules.batch) {
+        window.app.modules.batch.clearSelection();
+    }
+};
 
 // Export for global access
 export default App;

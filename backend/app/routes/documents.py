@@ -370,10 +370,20 @@ def list_documents():
     if document_category:
         query = query.filter(Document.document_category == document_category)
     
+    # Ordenação
+    sort_by = request.args.get('sort_by', 'uploaded_at')
+    order = request.args.get('order', 'desc')
+    
+    sort_column = getattr(Document, sort_by, Document.uploaded_at)
+    if order == 'desc':
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+
     # Paginação
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
-    pagination = query.order_by(Document.uploaded_at.desc()).paginate(
+    pagination = query.paginate(
         page=page, per_page=per_page, error_out=False
     )
     
@@ -579,7 +589,7 @@ def delete_document(doc_id):
         }), 500
 
 
-@documents_bp.route('/delete_many', methods=['POST'])
+@documents_bp.route('/delete-many', methods=['POST'])
 @jwt_required()
 @user_required
 def delete_many_documents():
@@ -689,21 +699,21 @@ def batch_add_metadata():
     if 'doc_type' in metadata and metadata['doc_type']:
         metadata['doc_type'] = metadata['doc_type'].lower()
     
-    # ✅ FASE 1: Validar digitizer_cpf_cnpj
-    if 'digitizer_cpf_cnpj' in metadata:
+    # ✅ FASE 1: Validar digitizer_cpf_cnpj (apenas se fornecido)
+    if 'digitizer_cpf_cnpj' in metadata and metadata['digitizer_cpf_cnpj']:
         is_valid, message = validate_cpf_cnpj(metadata['digitizer_cpf_cnpj'])
         if not is_valid:
             return jsonify({'success': False, 'message': message}), 400
     
-    # ✅ FASE 1: Validar resolution_dpi
-    if 'resolution_dpi' in metadata:
+    # ✅ FASE 1: Validar resolution_dpi (apenas se fornecido)
+    if 'resolution_dpi' in metadata and metadata['resolution_dpi']:
         is_valid, message = validate_resolution_dpi(metadata['resolution_dpi'])
         if not is_valid:
             return jsonify({'success': False, 'message': message}), 400
     
     # Validar metadados
     validator = MetadataValidator()
-    validation = validator.validate_metadata(metadata)
+    validation = validator.validate_metadata(metadata, partial=True)
     
     if not validation['valid']:
         return jsonify({

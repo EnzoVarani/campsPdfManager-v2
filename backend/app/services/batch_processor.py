@@ -122,7 +122,7 @@ class BatchProcessor:
                     continue
                 
                 # ✅ CORREÇÃO: Validar apenas metadados (sem document)
-                validation = validator.validate_metadata(metadata)
+                validation = validator.validate_metadata(metadata, partial=True)
                 
                 if not validation['valid']:
                     results.append({

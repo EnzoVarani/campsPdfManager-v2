@@ -175,6 +175,16 @@
                 <option value="nota_fiscal">Nota Fiscal</option>
                 <option value="prontuario">Prontuário</option>
               </select>
+              <select id="categoryFilter" onchange="loadDocuments(1)">
+                <option value="">Todas as categorias</option>
+                <option value="Administrativo">Administrativo</option>
+                <option value="Financeiro">Financeiro</option>
+                <option value="Jurídico">Jurídico</option>
+                <option value="Recursos Humanos">RH</option>
+                <option value="Técnico">Técnico</option>
+                <option value="Trabalhista">Trabalhista</option>
+                <option value="Médico">Médico</option>
+              </select>
               <button class="btn-primary" onclick="loadDocuments(1)">
                 🔍 Buscar
               </button>
@@ -218,13 +228,22 @@
                       onclick="toggleSelectAll()"
                     />
                   </th>
-                  <th width="60">ID</th>
-                  <th>Título / Arquivo</th>
+                  <th width="60" class="sortable" onclick="sortDocuments('id')">
+                    ID <span class="sort-icon">↕</span>
+                  </th>
+                  <th class="sortable" onclick="sortDocuments('title')">
+                    Título / Arquivo <span class="sort-icon">↕</span>
+                  </th>
                   <th>Autor</th>
                   <th>Tipo</th>
+                  <th>Categoria</th>
                   <th width="100">Tamanho</th>
-                  <th width="120">Status</th>
-                  <th width="150">Data Upload</th>
+                  <th width="120" class="sortable" onclick="sortDocuments('is_signed')">
+                    Status <span class="sort-icon">↕</span>
+                  </th>
+                  <th width="150" class="sortable" onclick="sortDocuments('uploaded_at')">
+                    Data Upload <span class="sort-icon">↕</span>
+                  </th>
                   <th width="150">Ações</th>
                 </tr>
               </thead>
@@ -313,15 +332,7 @@
                   <small>Mínimo: 150 DPI (recomendado: 300 DPI)</small>
                 </div>
 
-                <div class="form-group">
-                  <label for="equipment_info">🖨️ Equipamento Utilizado</label>
-                  <input
-                    type="text"
-                    id="equipment_info"
-                    placeholder="Ex: Scanner HP LaserJet Pro M404n"
-                    maxlength="200"
-                  />
-                </div>
+
 
                 <!-- Organização -->
                 <div class="form-group">
@@ -441,7 +452,7 @@
           >
         </p>
 
-        <form id="batchMetadataForm" onsubmit="submitBatchMetadata(event)">
+        <form id="batchMetadataForm">
           <div class="form-group">
             <label for="batchAuthor">Autor:</label>
             <input
@@ -460,6 +471,50 @@
               maxlength="500"
               placeholder="Ex: Contratos de Prestação de Serviços 2025"
             />
+          </div>
+
+          <!-- FASE 1: Novos Campos de Lote -->
+          <div class="form-grid">
+              <div class="form-group">
+                <label for="batchDigitizerName">Digitalizador:</label>
+                <input
+                  type="text"
+                  id="batchDigitizerName"
+                  maxlength="200"
+                  placeholder="Nome do responsável"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="batchDigitizerCpfCnpj">CPF/CNPJ:</label>
+                <input
+                  type="text"
+                  id="batchDigitizerCpfCnpj"
+                  maxlength="18"
+                  placeholder="000.000.000-00"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="batchResolution">Resolução (DPI):</label>
+                <input
+                  type="number"
+                  id="batchResolution"
+                  min="150"
+                  max="1200"
+                  placeholder="300"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="batchCompanyName">Empresa:</label>
+                <input
+                  type="text"
+                  id="batchCompanyName"
+                  maxlength="200"
+                  value="CAMPS Santos"
+                />
+              </div>
           </div>
 
           <div class="form-group">
@@ -482,16 +537,17 @@
           </div>
 
           <div class="form-group">
-            <label for="batchKeywords"
-              >Palavras-chave (separadas por vírgula):</label
-            >
-            <input
-              type="text"
-              id="batchKeywords"
-              maxlength="500"
-              placeholder="Ex: contrato, 2025, prestação, serviços"
-            />
-            <small>Separe as palavras-chave por vírgula</small>
+            <label for="batchDocCategory">Categoria:</label>
+            <select id="batchDocCategory">
+              <option value="">Selecione...</option>
+              <option value="Administrativo">Administrativo</option>
+              <option value="Financeiro">Financeiro</option>
+              <option value="Jurídico">Jurídico</option>
+              <option value="Recursos Humanos">Recursos Humanos</option>
+              <option value="Técnico">Técnico</option>
+              <option value="Trabalhista">Trabalhista</option>
+              <option value="Médico">Médico</option>
+            </select>
           </div>
 
           <div class="form-actions">
@@ -533,27 +589,22 @@
     <div id="documentModal" class="modal">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>📄 Detalhes do Documento</h2>
+          <h2>📄 <span id="viewDocTitle">Detalhes do Documento</span></h2>
           <button class="modal-close" onclick="closeDocumentModal()">✖</button>
         </div>
-        <div id="documentModalContent"></div>
+        <div class="modal-body">
+            <div id="docDetailsContent" class="doc-details-grid"></div>
+            <hr class="modal-divider">
+            <div id="docFase1Content" class="doc-fase1-grid"></div>
+        </div>
       </div>
     </div>
 
     <!-- Scripts -->
-    <script src="auth.js"></script>
-    <script src="app.js"></script>
+
 
     <script>
-      // ✅ Função auxiliar para limpar seleção
-      function clearSelection() {
-        selectedDocuments.clear();
-        document
-          .querySelectorAll(".doc-checkbox")
-          .forEach((cb) => (cb.checked = false));
-        document.getElementById("selectAllCheckbox").checked = false;
-        updateBatchActionsBar();
-      }
+      // Helper functions are now in main.js
     </script>
 
     <!-- ========================================
@@ -735,7 +786,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <!-- Modular Architecture -->
-    <script src="js/core/auth.js"></script>
     <script type="module" src="js/main.js"></script>
     
     <!-- Fallback -->

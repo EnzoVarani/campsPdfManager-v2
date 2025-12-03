@@ -29,23 +29,25 @@ class MetadataValidator:
     MAX_AUTHOR_LENGTH = 200
     MAX_SUBJECT_LENGTH = 1000
     
-    def validate_metadata(self, metadata: Dict, document: Optional[object] = None) -> Dict:
+    def validate_metadata(self, metadata: Dict, document: Optional[object] = None, partial: bool = False) -> Dict:
         """
         Valida metadados conforme padrões brasileiros
         
         Args:
             metadata: Dicionário com metadados a validar
             document: Objeto documento (opcional) para validações extras
+            partial: Se True, ignora validação de campos obrigatórios ausentes
             
         Returns:
             Dict com 'valid' (bool) e 'errors' (List[str])
         """
         errors = []
         
-        # 1. Validar campos obrigatórios
-        for field in self.REQUIRED_FIELDS:
-            if not metadata.get(field):
-                errors.append(f"Campo obrigatório ausente: {field}")
+        # 1. Validar campos obrigatórios (apenas se não for parcial)
+        if not partial:
+            for field in self.REQUIRED_FIELDS:
+                if not metadata.get(field):
+                    errors.append(f"Campo obrigatório ausente: {field}")
         
         # 2. Validar título
         if metadata.get('title'):

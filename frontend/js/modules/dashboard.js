@@ -25,30 +25,81 @@ export class DashboardModule {
         
         try {
             // Load summary stats
-            const summary = await this.api.get(ROUTES.ANALYTICS.SUMMARY);
-            this.updateStats(summary);
+            const summaryResponse = await this.api.get(ROUTES.ANALYTICS.SUMMARY);
+            if (summaryResponse.success && summaryResponse.data) {
+                this.updateStats(summaryResponse.data.totals);
+            }
 
             // Load charts
             await Promise.all([
                 this.loadTimelineChart(),
                 this.loadTypeChart(),
-                this.loadSignatureChart()
+                this.loadSignatureChart(),
+                this.loadRecentDocuments()
             ]);
 
         } catch (error) {
             console.error('Error loading dashboard:', error);
-            // Don't show toast here to avoid spamming on init
+        }
+    }
+
+    /**
+     * Load recent documents
+     */
+    async loadRecentDocuments() {
+        try {
+            const response = await this.api.get(ROUTES.DOCUMENTS.LIST, {
+                page: 1,
+                per_page: 5,
+                sort_by: 'uploaded_at',
+                order: 'desc'
+            });
+
+            const container = document.getElementById('recentDocuments');
+            if (!container) return;
+
+            if (response.success && response.data.documents.length > 0) {
+                container.innerHTML = response.data.documents.map(doc => `
+                    <div class="recent-doc-item" onclick="window.app.modules.documents.viewDocument(${doc.id})">
+                        <div class="doc-icon">📄</div>
+                        <div class="doc-info">
+                            <h4>${doc.title || doc.original_filename}</h4>
+                            <span>${new Date(doc.uploaded_at).toLocaleDateString()} • ${formatFileSize(doc.file_size)}</span>
+                        </div>
+                        <div class="doc-status">
+                            <span class="badge ${doc.is_signed ? 'badge-success' : 'badge-secondary'}">
+                                ${doc.is_signed ? 'Assinado' : 'Pendente'}
+                            </span>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                container.innerHTML = '<div class="empty-state-small">Nenhum documento recente</div>';
+            }
+        } catch (error) {
+            console.error('Error loading recent docs:', error);
         }
     }
 
     /**
      * Update summary statistics cards
      */
-    updateStats(data) {
-        this.animateValue('totalDocs', data.total_documents);
-        this.animateValue('totalSize', formatFileSize(data.total_size), true);
-        this.animateValue('signedDocs', data.signed_documents);
-        this.animateValue('pendingDocs', data.pending_documents);
+    updateStats(totals) {
+        if (!totals) return;
+        this.animateValue('totalDocs', totals.documents || 0);
+        // Assuming total_size isn't in totals based on python code, checking...
+        // Python code: 'totals': { 'documents': ..., 'signed_documents': ... }
+        // It doesn't seem to have total_size in the python response I saw?
+        // Let's check the python code again. It has total_documents, signed_documents, etc.
+        // It does NOT have total_size in the 'totals' dict in analytics.py!
+        // I will remove totalSize animation for now or fix backend later.
+        // For now, let's just handle what exists.
+        this.animateValue('signedDocs', totals.signed_documents || 0);
+        this.animateValue('todayDocs', totals.documents_today || 0);
+        
+        // Calculate rate if not provided
+        const rate = totals.documents > 0 ? ((totals.signed_documents / totals.documents) * 100).toFixed(1) : '0.0';
+        this.animateValue('signingRate', `${rate}%`, true);
     }
 
     /**
@@ -65,12 +116,25 @@ export class DashboardModule {
 
         const start = 0;
         const end = parseInt(value);
+        
+        // Safety check
+        if (isNaN(end)) {
+            element.textContent = '0';
+            return;
+        }
+
         const duration = 1000;
         const range = end - start;
         let current = start;
         const increment = end > start ? 1 : -1;
         const stepTime = Math.abs(Math.floor(duration / range));
         
+        // If range is 0, just set text
+        if (range === 0) {
+            element.textContent = end;
+            return;
+        }
+
         const timer = setInterval(() => {
             current += increment;
             element.textContent = current;
@@ -78,50 +142,69 @@ export class DashboardModule {
                 clearInterval(timer);
             }
         }, Math.max(stepTime, 10));
-        
-        // Fallback for very large numbers or 0
-        if (range === 0) element.textContent = end;
     }
 
     /**
      * Load timeline chart data
      */
     async loadTimelineChart() {
-        const data = await this.api.get(ROUTES.ANALYTICS.TIMELINE);
+        const response = await this.api.get(ROUTES.ANALYTICS.TIMELINE);
         
-        const labels = data.map(item => {
-            const [year, month, day] = item.date.split('-');
-            return `${day}/${month}`;
-        });
-        
-        const values = data.map(item => item.count);
-        
-        this.charts.timeline.render(values, labels);
+        if (response.success && response.data && response.data.basic) {
+            const data = response.data.basic;
+            const labels = data.map(item => {
+                // Handle date format YYYY-MM-DD
+                if (item.date) {
+                    const parts = item.date.split('-');
+                    if (parts.length === 3) {
+                        return `${parts[2]}/${parts[1]}`;
+                    }
+                }
+                return item.date;
+            });
+            
+            const values = data.map(item => item.count);
+            this.charts.timeline.render(values, labels);
+        }
     }
 
     /**
      * Load document type chart data
      */
     async loadTypeChart() {
-        const data = await this.api.get(ROUTES.ANALYTICS.BY_TYPE);
+        const response = await this.api.get(ROUTES.ANALYTICS.BY_TYPE);
         
-        const labels = data.map(item => item.type || 'Sem Tipo');
-        const values = data.map(item => item.count);
-        
-        this.charts.type.render(values, labels);
+        if (response.success && response.data && response.data.basic) {
+            const data = response.data.basic;
+            const labels = data.map(item => item.type || 'Sem Tipo');
+            const values = data.map(item => item.count);
+            this.charts.type.render(values, labels);
+        }
     }
 
     /**
      * Load signature status chart data
      */
     async loadSignatureChart() {
-        const data = await this.api.get(ROUTES.ANALYTICS.SIGNATURE_STATUS);
+        const response = await this.api.get(ROUTES.ANALYTICS.SIGNATURE_STATUS);
         
-        const labels = ['Assinados', 'Pendentes'];
-        const values = [data.signed, data.pending];
-        
-        this.charts.signature.render(values, labels, {
-            backgroundColor: ['#16a34a', '#9ca3af']
-        });
+        if (response.success && response.data && response.data.basic) {
+            const data = response.data.basic;
+            // Data is array of objects: [{status: 'Assinados', count: 1}, ...]
+            // We need to map it correctly or use fixed order
+            
+            const signedItem = data.find(i => i.status === 'Assinados');
+            const pendingItem = data.find(i => i.status === 'Não Assinados');
+            
+            const signedCount = signedItem ? signedItem.count : 0;
+            const pendingCount = pendingItem ? pendingItem.count : 0;
+            
+            const labels = ['Assinados', 'Pendentes'];
+            const values = [signedCount, pendingCount];
+            
+            this.charts.signature.render(values, labels, {
+                backgroundColor: ['#16a34a', '#9ca3af']
+            });
+        }
     }
 }

@@ -3435,15 +3435,17 @@ button:disabled {
   flex: 1;
 }
 
-.recent-doc-item .doc-info strong {
-  display: block;
+.recent-doc-item .doc-info h4 {
+  margin: 0 0 var(--space-4) 0;
   color: var(--color-text);
-  margin-bottom: var(--space-4);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
 }
 
-.recent-doc-item .doc-info small {
+.recent-doc-item .doc-info span {
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
+  display: block;
 }
 
 .recent-doc-item .doc-badge {
@@ -3933,24 +3935,66 @@ button:disabled {
   border-bottom: none;
 }
 
+/* Sortable Headers */
+.documents-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.documents-table th.sortable:hover {
+  background-color: var(--color-secondary-hover);
+}
+
+.documents-table th.active-sort {
+  /* background-color: var(--color-secondary-hover); REMOVED */
+  color: var(--color-text); /* Keep standard text color */
+}
+
+.sort-icon {
+  font-size: 0.8em;
+  margin-left: 4px;
+  opacity: 0.3;
+}
+
+.documents-table th.active-sort .sort-icon {
+  opacity: 1;
+  color: var(--color-primary); /* Only icon gets color */
+}
+
+/* Actions Column Alignment */
 .documents-table .actions {
   display: flex;
   gap: var(--space-8);
+  justify-content: flex-start;
+  align-items: center;
+  /* height: 100%; REMOVED - wrapper should fit content */
+}
+
+.documents-table td {
+  vertical-align: middle;
+  height: 60px;
+  padding: var(--space-8) var(--space-16); /* Reduced vertical padding */
 }
 
 .documents-table .btn-icon {
   background: none;
   border: none;
-  font-size: var(--font-size-xl);
+  font-size: 1.2rem; /* Fixed font size */
   cursor: pointer;
-  padding: var(--space-4);
+  width: 32px; /* Fixed width */
+  height: 32px; /* Fixed height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-sm);
   transition: all var(--duration-fast) var(--ease-standard);
+  padding: 0; /* Remove padding since we have fixed size */
 }
 
 .documents-table .btn-icon:hover {
   background: var(--color-secondary-hover);
-  transform: scale(1.1);
+  transform: scale(1.05); /* Slight scale */
 }
 
 .documents-table .btn-icon.btn-danger:hover {
@@ -4095,4 +4139,83 @@ button:disabled {
     color: var(--color-text);
     font-size: 14px;
     line-height: 18px;
+}
+
+/* =========================================
+   Document Details Modal Styles
+   ========================================= */
+
+.doc-details-grid,
+.doc-fase1-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-16);
+  margin-bottom: var(--space-24);
+}
+
+.detail-group {
+  background-color: var(--color-surface);
+  padding: var(--space-12) var(--space-16);
+  border-radius: var(--radius-base);
+  border: 1px solid var(--color-border);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.detail-group:hover {
+  border-color: var(--color-primary);
+}
+
+.detail-group label {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-4);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--font-weight-semibold);
+}
+
+.detail-group span {
+  display: block;
+  font-size: var(--font-size-md);
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.modal-divider {
+  border: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--color-border), transparent);
+  margin: var(--space-24) 0;
+}
+
+.modal-section-title {
+  font-size: var(--font-size-lg);
+  color: var(--color-primary);
+  margin-bottom: var(--space-16);
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-weight: var(--font-weight-bold);
+}
+
+/* Badge inside details */
+.detail-group .badge {
+  display: inline-block;
+  margin-top: var(--space-4);
+}
+
+/* Form Grid for Modals */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-16);
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
 }

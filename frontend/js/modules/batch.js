@@ -87,6 +87,25 @@ export class BatchModule {
     }
 
     /**
+     * Clear all selections
+     */
+    clearSelection() {
+        this.selectedDocuments.clear();
+        
+        // Uncheck all checkboxes
+        document.querySelectorAll('.doc-checkbox').forEach(cb => cb.checked = false);
+        const selectAll = document.getElementById('selectAllCheckbox');
+        if (selectAll) selectAll.checked = false;
+
+        // Sync with DocumentsModule
+        if (window.app.modules.documents) {
+            window.app.modules.documents.selectedDocuments = new Set();
+        }
+
+        this.updateActionBar();
+    }
+
+    /**
      * Open batch metadata modal
      */
     openMetadataModal() {
@@ -95,10 +114,35 @@ export class BatchModule {
         const modal = document.getElementById('batchMetadataModal');
         const count = document.getElementById('batchDocCount');
         const form = document.getElementById('batchMetadataForm');
+        const title = modal.querySelector('h2');
 
         if (modal && count) {
             count.textContent = this.selectedDocuments.size;
             if (form) form.reset();
+
+            // Pre-fill if single document selected
+            if (this.selectedDocuments.size === 1) {
+                const docId = Array.from(this.selectedDocuments)[0];
+                const doc = window.app.modules.documents.documents.find(d => d.id === docId);
+                
+                if (doc && form) {
+                    if (title) title.textContent = '📝 Editar Metadados';
+                    
+                    // Basic Fields
+                    if (doc.author) document.getElementById('batchAuthor').value = doc.author;
+                    if (doc.subject) document.getElementById('batchSubject').value = doc.subject;
+                    if (doc.doc_type) document.getElementById('batchDocType').value = doc.doc_type;
+                    
+                    // FASE 1 Fields
+                    if (doc.digitizer_name) document.getElementById('batchDigitizerName').value = doc.digitizer_name;
+                    if (doc.digitizer_cpf_cnpj) document.getElementById('batchDigitizerCpfCnpj').value = doc.digitizer_cpf_cnpj;
+                    if (doc.resolution_dpi) document.getElementById('batchResolution').value = doc.resolution_dpi;
+                    if (doc.company_name) document.getElementById('batchCompanyName').value = doc.company_name;
+                    if (doc.document_category) document.getElementById('batchDocCategory').value = doc.document_category;
+                }
+            } else {
+                if (title) title.textContent = '📝 Adicionar Metadados em Lote';
+            }
             
             // Setup submit handler
             if (form && !form.dataset.bound) {
@@ -116,12 +160,21 @@ export class BatchModule {
     async submitMetadata(event) {
         event.preventDefault();
 
-        const metadata = {
-            author: document.getElementById('batchAuthor')?.value || '',
-            subject: document.getElementById('batchSubject')?.value || '',
-            doc_type: document.getElementById('batchDocType')?.value || '',
-            // Keywords removed in FASE 1 cleanup
+        const rawMetadata = {
+            author: document.getElementById('batchAuthor')?.value,
+            subject: document.getElementById('batchSubject')?.value,
+            doc_type: document.getElementById('batchDocType')?.value,
+            digitizer_name: document.getElementById('batchDigitizerName')?.value,
+            digitizer_cpf_cnpj: document.getElementById('batchDigitizerCpfCnpj')?.value,
+            resolution_dpi: document.getElementById('batchResolution')?.value,
+            company_name: document.getElementById('batchCompanyName')?.value,
+            document_category: document.getElementById('batchDocCategory')?.value
         };
+
+        // Filter out empty strings to avoid validation errors
+        const metadata = Object.fromEntries(
+            Object.entries(rawMetadata).filter(([_, v]) => v !== '' && v !== null && v !== undefined)
+        );
 
         // Validate at least one field
         if (!Object.values(metadata).some(val => val)) {

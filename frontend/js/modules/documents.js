@@ -13,6 +13,8 @@ export class DocumentsModule {
         this.currentPage = 1;
         this.documents = [];
         this.selectedDocuments = new Set();
+        this.sortBy = 'uploaded_at';
+        this.sortOrder = 'desc';
     }
 
     /**
@@ -24,14 +26,18 @@ export class DocumentsModule {
         try {
             const search = document.getElementById('searchInput')?.value || '';
             const docType = document.getElementById('typeFilter')?.value || '';
+            const category = document.getElementById('categoryFilter')?.value || '';
 
             const params = {
                 page: page,
-                per_page: PAGINATION.DEFAULT_SIZE
+                per_page: PAGINATION.DEFAULT_SIZE,
+                sort_by: this.sortBy,
+                order: this.sortOrder
             };
 
             if (search) params.search = search;
             if (docType) params.doc_type = docType;
+            if (category) params.document_category = category;
 
             const response = await this.api.get(ROUTES.DOCUMENTS.LIST, params);
 
@@ -41,6 +47,7 @@ export class DocumentsModule {
                 this.renderTable();
                 this.renderPagination(response.data.pagination);
                 this.setupFilters();
+                this.updateSortIcons();
             } else {
                 showToast('Erro ao carregar documentos', 'error');
             }
@@ -49,6 +56,36 @@ export class DocumentsModule {
             console.error('Load documents error:', error);
             showToast('Erro de conexão', 'error');
         }
+    }
+
+    /**
+     * Sort documents
+     */
+    sort(field) {
+        if (this.sortBy === field) {
+            this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.sortBy = field;
+            this.sortOrder = 'asc';
+        }
+        this.load(1);
+    }
+
+    /**
+     * Update sort icons
+     */
+    updateSortIcons() {
+        const headers = document.querySelectorAll('.sortable');
+        headers.forEach(th => {
+            const icon = th.querySelector('.sort-icon');
+            if (th.onclick.toString().includes(this.sortBy)) {
+                icon.textContent = this.sortOrder === 'asc' ? '↑' : '↓';
+                th.classList.add('active-sort');
+            } else {
+                icon.textContent = '↕';
+                th.classList.remove('active-sort');
+            }
+        });
     }
 
     /**
@@ -61,7 +98,7 @@ export class DocumentsModule {
         if (this.documents.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="empty-state">
+                    <td colspan="10" class="empty-state">
                         Nenhum documento encontrado. Faça upload de PDFs para começar.
                     </td>
                 </tr>
@@ -84,7 +121,8 @@ export class DocumentsModule {
                     <br><small>${doc.original_filename}</small>
                 </td>
                 <td>${doc.author || '-'}</td>
-                <td>${doc.doc_type || '-'}</td>
+                <td style="text-transform: capitalize;">${doc.doc_type || '-'}</td>
+                <td>${doc.document_category || '-'}</td>
                 <td>${formatFileSize(doc.file_size)}</td>
                 <td>
                     <span class="badge ${doc.is_signed ? 'badge-success' : 'badge-secondary'}">
@@ -92,18 +130,20 @@ export class DocumentsModule {
                     </span>
                 </td>
                 <td>${formatDate(doc.uploaded_at)}</td>
-                <td class="actions">
-                    <button class="btn-icon" onclick="window.app.modules.documents.viewDocument(${doc.id})" title="Visualizar">
-                        👁️
-                    </button>
-                    <button class="btn-icon" onclick="window.app.modules.documents.downloadDocument(${doc.id})" title="Download">
-                        📥
-                    </button>
-                    ${window.app.auth.hasPermission('delete') ? `
-                        <button class="btn-icon btn-danger" onclick="window.app.modules.documents.deleteDocument(${doc.id})" title="Deletar">
-                            🗑️
+                <td>
+                    <div class="actions">
+                        <button class="btn-icon" onclick="window.app.modules.documents.viewDocument(${doc.id})" title="Visualizar">
+                            👁️
                         </button>
-                    ` : ''}
+                        <button class="btn-icon" onclick="window.app.modules.documents.downloadDocument(${doc.id})" title="Download">
+                            📥
+                        </button>
+                        ${window.app.auth.hasPermission('delete') ? `
+                            <button class="btn-icon btn-danger" onclick="window.app.modules.documents.deleteDocument(${doc.id})" title="Deletar">
+                                🗑️
+                            </button>
+                        ` : ''}
+                    </div>
                 </td>
             </tr>
         `).join('');
@@ -211,50 +251,116 @@ export class DocumentsModule {
             document.getElementById('viewDocTitle').textContent = doc.title || doc.original_filename;
             
             // Basic info
+            // Basic info
             const detailsHtml = `
                 <div class="detail-group">
-                    <label>Arquivo:</label>
+                    <label>Arquivo</label>
                     <span>${doc.original_filename}</span>
                 </div>
                 <div class="detail-group">
-                    <label>Tamanho:</label>
+                    <label>Tamanho</label>
                     <span>${formatFileSize(doc.file_size)}</span>
                 </div>
                 <div class="detail-group">
-                    <label>Enviado em:</label>
+                    <label>Enviado em</label>
                     <span>${formatDate(doc.uploaded_at)}</span>
                 </div>
                 <div class="detail-group">
-                    <label>Autor:</label>
+                    <label>Autor</label>
                     <span>${doc.author || '-'}</span>
                 </div>
                 <div class="detail-group">
-                    <label>Assunto:</label>
+                    <label>Assunto</label>
                     <span>${doc.subject || '-'}</span>
+                </div>
+                <div class="detail-group">
+                    <label>Status</label>
+                    <span class="badge ${doc.is_signed ? 'badge-success' : 'badge-secondary'}">
+                        ${doc.is_signed ? '✓ Assinado' : '⋯ Pendente'}
+                    </span>
                 </div>
             `;
             document.getElementById('docDetailsContent').innerHTML = detailsHtml;
 
             // FASE 1 Metadata
             const fase1Html = `
-                <div class="detail-group">
-                    <label>Digitalizador:</label>
-                    <span>${doc.digitizer_name || '-'}</span>
+                <div class="modal-section-title">
+                    <span>📋</span> Metadados FASE 1
                 </div>
-                <div class="detail-group">
-                    <label>CPF/CNPJ:</label>
-                    <span>${doc.digitizer_cpf_cnpj || '-'}</span>
-                </div>
-                <div class="detail-group">
-                    <label>Resolução:</label>
-                    <span>${doc.resolution_dpi ? doc.resolution_dpi + ' DPI' : '-'}</span>
-                </div>
-                <div class="detail-group">
-                    <label>Empresa:</label>
-                    <span>${doc.company_name || '-'}</span>
+                <div class="doc-fase1-grid">
+                    <div class="detail-group">
+                        <label>Digitalizador</label>
+                        <span>${doc.digitizer_name || '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>CPF/CNPJ</label>
+                        <span>${doc.digitizer_cpf_cnpj || '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>Resolução</label>
+                        <span>${doc.resolution_dpi ? doc.resolution_dpi + ' DPI' : '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>Empresa</label>
+                        <span>${doc.company_name || '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>Tipo Documental</label>
+                        <span>${doc.doc_type || '-'}</span>
+                    </div>
                 </div>
             `;
-            document.getElementById('docFase1Content').innerHTML = fase1Html;
+            // Note: docFase1Content container already exists in HTML, so we just set innerHTML.
+            // But wait, I put doc-fase1-grid inside the HTML string above, but the container in index.html is id="docFase1Content" class="doc-fase1-grid".
+            // So I should NOT wrap it in another doc-fase1-grid div if the container already has that class.
+            // Let's check index.html again.
+            // <div id="docFase1Content" class="doc-fase1-grid"></div>
+            // So I should just inject the items.
+            // BUT, I want a title before the grid.
+            // So I should probably change the container in index.html or inject the title outside the grid?
+            // Actually, I can just inject the title and then the items? No, grid will mess up the title.
+            // I will remove the class from the container in index.html or handle it here.
+            // Easier to handle here: I'll inject the title into the parent or change how I inject.
+            // Actually, `docFase1Content` is the container. If it has `display: grid`, the title will be a grid item.
+            // I should probably remove the class `doc-fase1-grid` from `docFase1Content` in index.html and put the grid inside.
+            // OR, I can just make the title span all columns.
+            // Let's try to be safe and just update index.html to remove the class from the ID container, and put the class on an inner div.
+            
+            // Wait, I can't update index.html in this tool call easily without another step.
+            // Let's just update the JS to handle it.
+            // I will target `docFase1Content` which is currently `<div id="docFase1Content" class="doc-fase1-grid"></div>`.
+            // If I put a title in there, it becomes a grid item.
+            // I will use `document.getElementById('docFase1Content').className = '';` to remove the grid class from the container,
+            // and then inject the title and a new div with the grid class.
+            
+            document.getElementById('docFase1Content').className = ''; // Remove grid class from container
+            document.getElementById('docFase1Content').innerHTML = `
+                <div class="modal-section-title">
+                    <span>📋</span> Metadados FASE 1
+                </div>
+                <div class="doc-fase1-grid">
+                    <div class="detail-group">
+                        <label>Digitalizador</label>
+                        <span>${doc.digitizer_name || '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>CPF/CNPJ</label>
+                        <span>${doc.digitizer_cpf_cnpj || '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>Resolução</label>
+                        <span>${doc.resolution_dpi ? doc.resolution_dpi + ' DPI' : '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>Empresa</label>
+                        <span>${doc.company_name || '-'}</span>
+                    </div>
+                    <div class="detail-group">
+                        <label>Tipo Documental</label>
+                        <span>${doc.doc_type || '-'}</span>
+                    </div>
+                </div>
+            `;
 
             // Show modal
             document.getElementById('documentModal').style.display = 'flex';
