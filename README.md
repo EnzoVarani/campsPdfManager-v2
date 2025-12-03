@@ -1,243 +1,135 @@
-# 🏢 CAMPS PDF Manager v2.0
+# 📄 CAMPS PDF Manager v2.0
 
-## 📋 Visão Geral
+> Sistema profissional de gestão, validação e assinatura digital de documentos PDF, em conformidade com o **Decreto nº 10.278/2020** (FASE 1).
 
-Sistema completo de gerenciamento de PDFs com certificação digital, autenticação JWT e dashboard analytics para CAMPS Santos.
+![Status](https://img.shields.io/badge/Status-Active-success)
+![Version](https://img.shields.io/badge/Version-2.0.0-blue)
+![Compliance](https://img.shields.io/badge/Compliance-Decreto%2010.278-green)
 
-### 🚀 Funcionalidades Principais
+## 🎯 Visão Geral
 
-- **Autenticação JWT** com controle de roles (Admin/User/Viewer)
-- **Upload múltiplo** de PDFs com validação
-- **Gestão de metadados** com padrões brasileiros
-- **Dashboard analytics** com gráficos interativos
-- **Sistema de auditoria** completo
-- **Interface moderna** e responsiva
-- **Integração DocuSign** para assinaturas digitais
+O **CAMPS PDF Manager** é uma solução robusta para digitalização e gestão de documentos, projetada para garantir a validade jurídica e a integridade de arquivos digitais. A versão 2.0 introduz uma arquitetura modular moderna e conformidade total com os requisitos técnicos da legislação brasileira para digitalização de documentos.
 
----
+### ✨ Principais Funcionalidades
 
-## 🛠️ Instalação Rápida
-
-### 1. Clone o Repositório
-```bash
-git clone https://github.com/EnzoVarani/campsPdfManager-v2.git
-cd campsPdfManager-v2
-```
-
-### 2. Configure o Backend
-```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-
-# Configure environment
-copy .env.example .env
-# Edite .env com suas configurações
-```
-
-### 3. Execute a Aplicação
-```bash
-python run.py
-```
-
-### 4. Acesse o Frontend
-Abra `frontend/index.html` no navegador ou configure um servidor local.
-
-**Credenciais padrão:** admin@camps.com / admin123
+*   **Gestão de Documentos**: Upload, listagem, visualização e download de PDFs.
+*   **Conformidade Legal (FASE 1)**: Coleta e validação de metadados obrigatórios (Digitalizador, CPF/CNPJ, Resolução DPI, etc.).
+*   **Assinatura Digital**: Integração para assinatura eletrônica de documentos.
+*   **Processamento em Lote**: Atualização de metadados e exclusão de múltiplos arquivos simultaneamente.
+*   **Analytics**: Dashboard interativo com estatísticas de uso e status de assinaturas.
+*   **Controle de Acesso**: Sistema de autenticação JWT com níveis de permissão (Admin, User, Viewer).
 
 ---
 
-## 📁 Estrutura do Projeto
+## 🏗️ Arquitetura do Projeto
+
+O projeto adota uma arquitetura moderna e desacoplada:
+
+### Backend (Python/Flask)
+*   **API RESTful**: Endpoints seguros e documentados.
+*   **SQLAlchemy**: ORM para gestão eficiente do banco de dados.
+*   **JWT Auth**: Autenticação segura e stateless.
+*   **Services**: Camada de serviços para lógica de negócios complexa (PDF manipulation, Batch processing).
+
+### Frontend (Modular JavaScript)
+O frontend foi completamente reestruturado para modularidade e manutenibilidade:
 
 ```
-campsPdfManager-v2/
-├── backend/
-│   ├── app/
-│   │   ├── auth/           # Autenticação JWT
-│   │   ├── routes/         # Endpoints da API
-│   │   ├── services/       # Lógica de negócio
-│   │   ├── utils/          # Utilitários e validadores
-│   │   ├── models.py       # Modelos do banco
-│   │   ├── config.py       # Configurações
-│   │   └── __init__.py     # Factory da aplicação
-│   ├── tests/              # Testes automatizados
-│   ├── storage/            # Armazenamento de arquivos
-│   ├── requirements.txt    # Dependências Python
-│   ├── .env.example        # Template de configuração
-│   └── run.py             # Entrada da aplicação
-└── frontend/
-    ├── index.html          # Interface principal
-    ├── auth.js            # Sistema de autenticação
-    ├── app.js             # Lógica da aplicação
-    └── styles.css         # Estilos modernos
+frontend/js/
+├── core/           # Núcleo (API Client, Auth Manager)
+├── modules/        # Módulos funcionais independentes
+│   ├── dashboard.js
+│   ├── documents.js
+│   ├── upload.js   # Com integração FASE 1
+│   ├── batch.js
+│   └── users.js
+├── components/     # Componentes reutilizáveis (Charts, Modals)
+├── fase1/          # Lógica de conformidade legal (Validators, Metadata)
+└── utils/          # Utilitários (Formatters, Toast)
 ```
 
 ---
 
-## 🔐 Sistema de Autenticação
+## 🚀 Instalação e Configuração
 
-### Roles Disponíveis:
+### Pré-requisitos
+*   Python 3.8+
+*   Pip (Gerenciador de pacotes Python)
+*   Navegador moderno (Chrome, Firefox, Edge)
 
-| Role | Permissões |
-|------|------------|
-| **Admin** | Acesso total, gestão de usuários |
-| **User** | Upload, edição, visualização |
-| **Viewer** | Apenas visualização |
+### Passo a Passo
 
-### Endpoints de Auth:
+1.  **Clone o repositório**
+    ```bash
+    git clone https://github.com/seu-org/camps-pdf-manager-v2.git
+    cd camps-pdf-manager-v2
+    ```
 
-```http
-POST /api/auth/login          # Login com email/senha
-POST /api/auth/refresh        # Renovar token
-GET  /api/auth/profile        # Dados do usuário atual
-POST /api/auth/users          # Criar usuário (admin only)
-GET  /api/auth/users          # Listar usuários (admin only)
-```
+2.  **Configure o Backend**
+    ```bash
+    cd backend
+    python -m venv venv
+    source venv/bin/activate  # Windows: venv\Scripts\activate
+    pip install -r requirements.txt
+    ```
 
----
+3.  **Variáveis de Ambiente**
+    Crie um arquivo `.env` na pasta `backend` com base no `.env.example`:
+    ```env
+    FLASK_APP=run.py
+    FLASK_ENV=development
+    SECRET_KEY=sua_chave_secreta_segura
+    DATABASE_URL=sqlite:///camps_manager.db
+    ```
 
-## 📄 Gestão de Documentos
+4.  **Inicialize o Banco de Dados**
+    ```bash
+    flask db upgrade
+    ```
 
-### Endpoints Principais:
-
-```http
-POST /api/documents/upload              # Upload de PDFs
-GET  /api/documents                     # Listar com filtros
-GET  /api/documents/{id}               # Detalhes do documento
-POST /api/documents/{id}/metadata      # Adicionar metadados
-GET  /api/documents/{id}/download      # Download do PDF
-DELETE /api/documents/{id}            # Deletar documento
-GET  /api/documents/stats              # Estatísticas rápidas
-```
-
-### Fluxo de Upload:
-1. **Upload** → Validação → Hash → Banco
-2. **Metadados** → Processamento → PDF com metadata
-3. **Auditoria** → Log de todas as ações
-
----
-
-## 📊 Dashboard e Analytics
-
-### Métricas Disponíveis:
-- Total de documentos
-- Documentos assinados
-- Uploads por período
-- Distribuição por tipo
-- Status de assinaturas
-- Usuários ativos
-
-### Gráficos Interativos:
-- **Timeline:** Documentos ao longo do tempo
-- **Tipos:** Distribuição por categoria
-- **Assinaturas:** Status de certificação
+5.  **Execute a Aplicação**
+    ```bash
+    python run.py
+    ```
+    O servidor iniciará em `http://localhost:5000`.
 
 ---
 
-## 🧪 Testes
+## 📖 Guia de Uso
 
-```bash
-# Executar testes
-cd backend
-pytest tests/ -v
+### 1. Upload de Documentos (FASE 1)
+Ao fazer upload de um arquivo, o sistema solicitará automaticamente os metadados exigidos pelo Decreto 10.278/2020:
+*   **Autor/Digitalizador**: Nome do responsável.
+*   **CPF/CNPJ**: Identificação do responsável (validado automaticamente).
+*   **Resolução**: DPI da digitalização (mínimo 150 DPI).
 
-# Testes específicos
-pytest tests/test_auth.py -v
-```
+### 2. Gestão em Lote
+Selecione múltiplos documentos na lista para realizar ações em massa:
+*   **Atualizar Metadados**: Defina autor, assunto ou tipo para vários arquivos de uma vez.
+*   **Excluir**: Remova múltiplos arquivos com segurança.
 
-**Cobertura de Testes:**
-- Autenticação e autorização
-- Operações CRUD de documentos
-- Validações de entrada
-- Sistema de roles
-
----
-
-## 🚀 Deploy
-
-### Desenvolvimento:
-```bash
-python run.py
-```
-**URL:** http://localhost:5000
-
-### Produção:
-1. Configure PostgreSQL
-2. Atualize `DATABASE_URL` no .env
-3. Use `gunicorn` para servir a aplicação
-
----
-
-## ⚙️ Configurações
-
-### Variáveis de Ambiente Essenciais:
-
-```env
-# Flask
-SECRET_KEY=sua_chave_super_secreta
-JWT_SECRET_KEY=sua_jwt_chave_super_secreta
-
-# Database
-DATABASE_URL=sqlite:///camps.db
-
-# CAMPS
-COMPANY_NAME=CAMPS Santos
-DEFAULT_LOCATION=Santos, SP, Brasil
-ID_PREFIX=CAMPS
-
-# Admin
-ADMIN_EMAIL=admin@camps.com
-ADMIN_PASSWORD=admin123
-
-# DocuSign (opcional)
-DOCUSIGN_INTEGRATION_KEY=seu_integration_key
-DOCUSIGN_USER_ID=seu_user_id
-DOCUSIGN_ACCOUNT_ID=seu_account_id
-```
-
----
-
-## 📋 Status do Desenvolvimento
-
-### ✅ Implementado:
-- [x] Sistema de autenticação JWT
-- [x] Gestão de usuários e roles
-- [x] Upload e validação de PDFs
-- [x] Adição de metadados
-- [x] Dashboard com gráficos
-- [x] Interface frontend completa
-- [x] Sistema de auditoria
-- [x] Testes automatizados
-- [x] API REST organizada
-
-### 🔄 Próximas Melhorias:
-- [ ] Integração DocuSign funcional
-- [ ] Sistema de backup
-- [ ] Relatórios em PDF
-- [ ] Configuração Docker
-- [ ] Deploy automático
+### 3. Dashboard
+Acompanhe métricas em tempo real:
+*   Timeline de uploads.
+*   Distribuição por tipo de documento.
+*   Status de assinaturas (Assinado vs. Pendente).
 
 ---
 
 ## 🤝 Contribuição
 
-Projeto desenvolvido para CAMPS Santos com foco em:
-- **Segurança:** Autenticação robusta e controle de acesso
-- **Usabilidade:** Interface intuitiva e moderna
-- **Escalabilidade:** Arquitetura preparada para crescimento
-- **Auditoria:** Rastreamento completo de ações
+1.  Faça um Fork do projeto.
+2.  Crie uma Branch para sua Feature (`git checkout -b feature/NovaFeature`).
+3.  Commit suas mudanças (`git commit -m 'Add: Nova Feature'`).
+4.  Push para a Branch (`git push origin feature/NovaFeature`).
+5.  Abra um Pull Request.
 
 ---
 
-## 📞 Suporte
+## 📄 Licença
 
-**Desenvolvido por:** Perplexity AI + Enzo Varani  
-**Empresa:** CAMPS Santos  
-**Versão:** 2.0.0  
-**Python:** 3.12+ recomendado  
-**License:** Uso interno CAMPS Santos  
+Este projeto está sob a licença [MIT](LICENSE).
 
 ---
 
-**🎯 Sistema pronto para uso em produção!**
+**Desenvolvido por Equipe CAMPS Santos**

@@ -267,6 +267,114 @@
               <p class="empty-state">Nenhum arquivo selecionado</p>
             </div>
 
+            <!-- ✅ FASE 1: Formulário de Metadados Obrigatórios -->
+            <div id="metadataForm" class="metadata-form" style="display: none;">
+              <h3>📋 Metadados FASE 1 - Decreto 10.278/2020</h3>
+              <p class="form-description">
+                Campos obrigatórios para conformidade legal na digitalização de documentos.
+              </p>
+
+              <div class="form-grid">
+                <!-- Digitalizador -->
+                <div class="form-group">
+                  <label for="digitizer_name">👤 Nome do Digitalizador *</label>
+                  <input
+                    type="text"
+                    id="digitizer_name"
+                    required
+                    placeholder="Ex: João Silva"
+                    maxlength="200"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="digitizer_cpf_cnpj">🆔 CPF/CNPJ do Digitalizador *</label>
+                  <input
+                    type="text"
+                    id="digitizer_cpf_cnpj"
+                    required
+                    placeholder="000.000.000-00 ou 00.000.000/0001-00"
+                    maxlength="18"
+                  />
+                  <small>Apenas números (será formatado automaticamente)</small>
+                </div>
+
+                <!-- Digitalização -->
+                <div class="form-group">
+                  <label for="resolution_dpi">📐 Resolução (DPI) *</label>
+                  <input
+                    type="number"
+                    id="resolution_dpi"
+                    required
+                    value="300"
+                    min="150"
+                    max="1200"
+                  />
+                  <small>Mínimo: 150 DPI (recomendado: 300 DPI)</small>
+                </div>
+
+                <div class="form-group">
+                  <label for="equipment_info">🖨️ Equipamento Utilizado</label>
+                  <input
+                    type="text"
+                    id="equipment_info"
+                    placeholder="Ex: Scanner HP LaserJet Pro M404n"
+                    maxlength="200"
+                  />
+                </div>
+
+                <!-- Organização -->
+                <div class="form-group">
+                  <label for="company_name">🏢 Nome da Empresa</label>
+                  <input
+                    type="text"
+                    id="company_name"
+                    value="CAMPS Santos"
+                    maxlength="200"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="company_cnpj">🏛️ CNPJ da Empresa</label>
+                  <input
+                    type="text"
+                    id="company_cnpj"
+                    placeholder="00.000.000/0001-00"
+                    maxlength="18"
+                  />
+                </div>
+
+                <!-- Classificação -->
+                <div class="form-group">
+                  <label for="document_type">📂 Tipo de Documento</label>
+                  <input
+                    type="text"
+                    id="document_type"
+                    placeholder="Ex: Contrato de Aprendizagem"
+                    maxlength="100"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="document_category">📑 Categoria</label>
+                  <select id="document_category">
+                    <option value="">Selecione...</option>
+                    <option value="Administrativo">Administrativo</option>
+                    <option value="Financeiro">Financeiro</option>
+                    <option value="Jurídico">Jurídico</option>
+                    <option value="Recursos Humanos">Recursos Humanos</option>
+                    <option value="Técnico">Técnico</option>
+                    <option value="Trabalhista">Trabalhista</option>
+                    <option value="Médico">Médico</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-note">
+                <strong>* Campos obrigatórios</strong> conforme Decreto 10.278/2020
+              </div>
+            </div>
+
             <div class="upload-actions">
               <button id="uploadBtn" class="btn-primary btn-lg" disabled>
                 📤 Enviar PDFs
@@ -623,5 +731,16 @@
         </form>
       </div>
     </div>
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Modular Architecture -->
+    <script src="js/core/auth.js"></script>
+    <script type="module" src="js/main.js"></script>
+    
+    <!-- Fallback -->
+    <script nomodule>
+        alert('Seu navegador não suporta módulos ES6.');
+    </script>
   </body>
 </html>
